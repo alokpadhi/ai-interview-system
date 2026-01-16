@@ -1,0 +1,45 @@
+app:
+  name: ai-interview-system
+
+api:
+  host: 0.0.0.0
+  port: 8000
+
+
+llms:
+  provider: ollama
+
+  primary:
+    model: qwen2.5:14b-instruct-q5_K_M
+    keep_alive: 30m
+    temperature: 0.4
+    max_tokens: 4096
+    timeout: 180
+
+  secondary:
+    model: qwen2.5:7b-instruct-q5_K_M
+    keep_alive: 30m
+    temperature: 0.2
+    max_tokens: 2048
+    timeout: 120
+
+embedding:
+  provider: sentence-transformers
+  model: all-MiniLM-L6-v2
+
+vectordatabase:
+  provider: chromadb
+  persist_directory: ./data/vector_db
+
+database:
+  type: sqlite
+  path: ./data/sqlite/interviews.db
+
+mlflow:
+  tracking_uri: ./mlruns
+  experiment_name: ai-interview-system
+
+logging:
+  level: INFO
+  file: ./logs/app.log
+  

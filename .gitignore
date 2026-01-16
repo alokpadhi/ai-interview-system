@@ -1,0 +1,28 @@
+# Environment
+venv/
+.env
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.class
+.pytest_cache/
+
+# Data
+data/vector_db/
+data/sqlite/*.db
+mlruns/
+
+# Logs
+logs/
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
