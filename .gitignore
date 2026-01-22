@@ -26,3 +26,11 @@ logs/
 # OS
 .DS_Store
 Thumbs.db
+
+# others
+rough_works/
+
+# datasets
+data/datasets/raw/
+data/datasets/processed/
+

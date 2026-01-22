@@ -13,10 +13,21 @@ dependencies = [
     "langgraph>=1.0.6",
     "mlflow>=3.8.1",
     "pydantic>=2.12.5",
-    "pytest>=9.0.2",
+    "pymupdf>=1.26.7",
     "pyyaml>=6.0.3",
     "sentence-transformers>=5.2.0",
     "torch>=2.9.1",
     "transformers>=4.57.5",
     "uvicorn>=0.40.0",
 ]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.0.2",
+    "kagglehub>=0.4.0"
+
+]
+
+[tool.black]
+line-length = 88
+target-version = ["py311"]
