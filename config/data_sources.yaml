@@ -4,8 +4,11 @@ data_sources:
     raw:
       - name: kaggle
         type: public_datset
+        files:
+          - deeplearning_questions.csv
+          - interview_question_bank.csv
         local_path: data/datasets/raw/interview_questions
-      - name: curated_github
+      - name: github
         type: repository
         urls:
           - https://raw.githubusercontent.com/alexeygrigorev/data-science-interviews/refs/heads/master/theory.md

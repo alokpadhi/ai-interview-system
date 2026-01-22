@@ -12,7 +12,7 @@ STOPWORDS = {
     "you", "which", "can", "use", "main"
 }
 
-class CollectInterviewQuestions:
+class CollectGithubInterviewQuestions:
     def __init__(self, github_url=None):
         self.github_url = github_url
     
@@ -169,7 +169,7 @@ def main():
     all_interview_questions = []
     print("Parsing interview questions...")
     for idx, url in enumerate(urls):
-        interview_question_collector = CollectInterviewQuestions(url)
+        interview_question_collector = CollectGithubInterviewQuestions(url)
         print(f"Fetching markdown file from url#{idx+1}...")
         content = interview_question_collector.get_response()
         print(f"Parsing markdown file from url#{idx+1}...")
