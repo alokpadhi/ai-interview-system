@@ -33,4 +33,7 @@ rough_works/
 # datasets
 data/datasets/raw/
 data/datasets/processed/
+data/rubrics/
+data/validation_output/
+data/validation_recheck_output/
 

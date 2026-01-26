@@ -23,11 +23,16 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=9.0.2",
-    "kagglehub>=0.4.0"
-
+    
 ]
 
 [tool.black]
 line-length = 88
 target-version = ["py311"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+    "kagglehub>=0.4.0",
+    "detoxify>=0.5.2",
+]
