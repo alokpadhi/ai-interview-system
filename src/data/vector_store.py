@@ -1,86 +1,214 @@
-from typing import List, Dict, Any, Optional, TYPE_CHECKING
-import os
-from pathlib import Path
+"""
+ChromaDB vector store client.
+Handles collection management, document insertion, and hybrid search.
+"""
+
 import chromadb
-from chromadb import Collection
+from chromadb.config import Settings as ChromaSettings
 from chromadb.utils import embedding_functions
+from typing import List, Dict, Optional, Any
+from pathlib import Path
+from src.utils.config import get_settings
 from src.utils.logging_config import get_logger
-import torch
 
-if TYPE_CHECKING:
-    from chromadb.api import ClientAPI
 
+settings = get_settings()
 logger = get_logger(__name__)
 
+
 class VectorStore:
+    """
+    ChromaDB client with production-optimized configuration.
+    
+    Features:
+    - Persistent storage
+    - HNSW index tuning for 768-dim embeddings
+    - Hybrid search (semantic + metadata filtering)
+    - Batch operations
+    """
+    
     def __init__(self, persist_directory: str = "data/vector_db"):
-        """initialize the vector store
         """
-        logger.info("ChromaDB initializing...")
-        # Ensure directory exists
-        Path(persist_directory).mkdir(parents=True, exist_ok=True)
-        self.client: "ClientAPI" = chromadb.PersistentClient(
-            persist_directory
-        )
-        logger.info("ChromaDB initialized at {persistent_directory}")
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+        Initialize ChromaDB client with persistence.
         
+        Args:
+            persist_directory: Directory for ChromaDB persistence
+        """
+        Path(persist_directory).mkdir(parents=True, exist_ok=True)
+        self.client = chromadb.PersistentClient(
+            settings=ChromaSettings(
+                anonymized_telemetry=False,
+                allow_reset=True
+            )
+        )
         self.embedding_function = embedding_functions.SentenceTransformerEmbeddingFunction(
-            model_name="BAAI/bge-base-en-v1.5",
-            device=device,
-            normalize_embeddings=True
+            model_name=settings.embedding_model
         )
 
-    def create_collection(self, 
-                          collection_name: str, 
-                          metadata: Optional[Dict] = {
-                              "hnsw:space": "cosine",
-                              "hnsw:M": 32,  # Increase connections (default 16)\
-                              "hnsw:ef_construction": 200,  # Better index quality
-                              "hnsw:ef_search": 100  # Better search quality
-                              }, 
-                          reset: bool = False) -> Collection:
-        """Create or delete collection in chromadb.
-
+        logger.info(f"ChromaDB client initialized at {persist_directory}.")
+    
+    def create_collection(
+        self,
+        name: str,
+        metadata: Optional[Dict] = None,
+        reset: bool = False
+    ):
+        """
+        Create or get collection with HNSW optimization.
+        
         Args:
-            collection_name (_type_, optional): collection name. Defaults to str.
-            metadata (Optional[Dict], optional): meta data. Defaults to None.
-            reset (bool, optional): Delete the collection Flag. Defaults to False.
+            name: Collection name
+            metadata: Optional collection metadata
+            reset: If True, delete existing collection first
+            
+        Returns:
+            Collection object
         """
         if reset:
-            self.client.delete_collection(name=collection_name)
-            logger.info(f"{collection_name} collection is deleted")
-
+            try:
+                self.delete_collection(name)
+            except Exception:
+                pass  # Ignore if it doesn't exist
+        hnsw_config = {
+            "hnsw:space": "cosine",
+            "hnsw:M": 32,
+            "hnsw:construction_ef": 200,
+            "hnsw:search_ef": 100
+        }
+        collection_metadata = {**hnsw_config, **(metadata or {})}
         collection = self.client.get_or_create_collection(
-            name=collection_name,
-            embedding_function=self.embedding_function,
-            metadata=metadata
+            name=name,
+            metadata=collection_metadata
         )
-        logger.info(f"collection created with name: {collection.name}")
+        logger.info(f"Collection {collection.name} is created.")
         return collection
 
-    def modify_collection(self,
-                          collection: Collection,
-                          collection_name: str,
-                          metadata: Optional[Dict]=None) -> Collection:
-        collection = collection.modify(name=collection_name, metadata=metadata)
+    
+    def add_documents(
+        self,
+        collection_name: str,
+        documents: List[str],
+        metadatas: List[Dict],
+        ids: List[str],
+        batch_size: int = 1000
+    ):
+        """
+        Add documents to collection in batches.
+        
+        Args:
+            collection_name: Target collection
+            documents: List of text documents to embed
+            metadatas: List of metadata dicts
+            ids: List of unique IDs
+            batch_size: Batch size for insertion (ChromaDB recommends 1000)
+        """
+        if not (len(documents) == len(metadatas) == len(ids)):
+            raise ValueError(
+                f"Length mismatch: documents={len(documents)},"
+                f"metadatas={len(metadatas)}, ids={len(ids)}"
+            )
+        
+        if len(set(ids)) != len(ids):
+            raise ValueError("Duplicate IDs detected. All document IDs must be unique.")
+        
+        if not documents:
+            return 
+        
+        collection = self.client.get_collection(collection_name)
+        total_docs = len(documents)
 
-        return collection
+        logger.info(f"Starting batch insert into '{collection_name}' | total_docs={total_docs}, batch_size={batch_size}")
 
-    def add_documents():
-        #TODO
-        pass
+        for start in range(0, total_docs, batch_size):
+            end = min(start + batch_size, total_docs)
 
-    def query():
-        #TODO
-        pass
+            batch_docs = documents[start:end]
+            batch_ids = ids[start:end]
+            batch_metadatas = metadatas[start:end]
 
-    def get_collection_stats():
-        #TODO
-        pass
+            collection.add(
+                documents=batch_docs,
+                metadatas=batch_metadatas,
+                ids=batch_ids
+            )
+            logger.info(f"Inserted batch {start}:{end} ({end}/{total_docs})")
 
-    def list_collections():
-        #TODO
-        pass
+        logger.info(f"Completed inserting {total_docs} documents into '{collection_name}'")
+
+    def query(
+        self,
+        collection_name: str,
+        query_text: str,
+        n_results: int = 5,
+        where: Optional[Dict] = None,
+        where_document: Optional[Dict] = None
+    ) -> Dict:
+        """
+        Query collection with hybrid search (semantic + metadata filters).
+        
+        Args:
+            collection_name: Collection to query
+            query_text: Text query for semantic search
+            n_results: Number of results to return
+            where: Metadata filters (e.g., {"difficulty": "medium"})
+            where_document: Document content filters
+            
+        Returns:
+            Dict with keys: ids, documents, metadatas, distances
+        """
+        if not collection_name:
+            raise ValueError(f"Collection doesn't exist. Please create the collection first with create_collection().")
+        collection = self.client.get_collection(collection_name)
+        results = collection.query(
+            query_texts=query_text,
+            n_results=n_results,
+            where=where,
+            where_document=where_document
+        )
+
+        return results
+
+    
+    def get_collection_stats(self, collection_name: str) -> Dict:
+        """
+        Get statistics about a collection.
+        
+        Args:
+            collection_name: Collection name
+            
+        Returns:
+            Dict with count, metadata, etc.
+        """
+        if not collection_name:
+            raise ValueError(f"Collection doesn't exist. Please create the collection first with create_collection()")
+        
+        collection = self.client.get_collection(collection_name)
+
+        return {
+            "name": collection.name,
+            "count": collection.count(),
+            "metadata": collection.metadata
+        }
+    
+    def list_collections(self) -> List[str]:
+        """List all collection names"""
+        cols = self.client.list_collections()
+        return [c.name for c in cols]
+    
+    def delete_collection(self, collection_name: str):
+        try:
+            self.client.delete_collection(collection_name)
+            logger.info(f"Deleted collection: {collection_name}")
+        except Exception as e:
+            if "does not exist" in str(e).lower():
+                logger.info(f"Collection {collection_name} does not exist, skipping delete")
+            else:
+                raise
 
 
+
+def get_vector_store() -> VectorStore:
+    """Get vector store instance (can be singleton later if needed)"""
+    from src.utils.config import get_settings
+    settings = get_settings()
+    return VectorStore(persist_directory=str(settings.vector_db_path))
