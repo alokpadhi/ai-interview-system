@@ -9,6 +9,8 @@ src/ai_interview_system.egg-info/requires.txt
 src/ai_interview_system.egg-info/top_level.txt
 src/api/__init__.py
 src/data/__init__.py
+src/data/embeddings.py
+src/data/vector_store.py
 src/graph/__init__.py
 src/monitoring/__init__.py
 src/rag/__init__.py
@@ -17,4 +19,5 @@ src/tools/__init__.py
 src/ui/__init__.py
 src/utils/__init__.py
 src/utils/config.py
+src/utils/example_logging_usage.py
 src/utils/logging_config.py
