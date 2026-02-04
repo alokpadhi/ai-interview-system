@@ -36,6 +36,7 @@ class VectorStore:
         """
         Path(persist_directory).mkdir(parents=True, exist_ok=True)
         self.client = chromadb.PersistentClient(
+            path=persist_directory,
             settings=ChromaSettings(
                 anonymized_telemetry=False,
                 allow_reset=True

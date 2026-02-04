@@ -36,4 +36,6 @@ data/datasets/processed/
 data/rubrics/
 data/validation_output/
 data/validation_recheck_output/
+data/vector_db/
+
 
