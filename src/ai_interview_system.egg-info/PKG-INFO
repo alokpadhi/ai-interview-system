@@ -1,0 +1,29 @@
+Metadata-Version: 2.4
+Name: ai-interview-system
+Version: 0.1.0
+Summary: Add your description here
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: chromadb>=1.4.1
+Requires-Dist: fastapi>=0.128.0
+Requires-Dist: langchain>=1.2.4
+Requires-Dist: langchain-anthropic>=1.3.1
+Requires-Dist: langchain-community>=0.4.1
+Requires-Dist: langchain-ollama>=1.0.1
+Requires-Dist: langchain-openai>=1.1.7
+Requires-Dist: langgraph>=1.0.6
+Requires-Dist: mlflow>=3.8.1
+Requires-Dist: pydantic>=2.12.5
+Requires-Dist: pymupdf>=1.26.7
+Requires-Dist: pyyaml>=6.0.3
+Requires-Dist: sentence-transformers>=5.2.0
+Requires-Dist: torch>=2.9.1
+Requires-Dist: tqdm>=4.67.1
+Requires-Dist: transformers>=4.57.5
+Requires-Dist: uvicorn>=0.40.0
+Provides-Extra: dev
+Requires-Dist: pytest>=7.4.4; extra == "dev"
+Requires-Dist: pytest-asyncio>=0.23.3; extra == "dev"
+Requires-Dist: black>=24.1.0; extra == "dev"
+Requires-Dist: ruff>=0.1.0; extra == "dev"
+Requires-Dist: mypy>=1.8.0; extra == "dev"

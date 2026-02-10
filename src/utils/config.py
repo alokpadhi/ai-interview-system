@@ -1,76 +1,104 @@
-import yaml
-import os
+"""Configuration management using pydantic settings.
+"""
+
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field
 from pathlib import Path
-from pydantic import BaseModel
+from typing import Literal
 
-class AppConfig(BaseModel):
-    name: str
 
-class APIConfig(BaseModel):
-    host: str
-    port: int
+class Settings(BaseSettings):
+    """Applilcation settings loaded from env variables"""
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False
+    )
 
-class LLMDetailConfig(BaseModel):
-    model: str
-    keep_alive: str
-    temperature: float
-    max_tokens: int
-    timeout: int
+    # LLM config
+    llm_provider: Literal["ollama", "openai", "anthropic"] = "ollama"
 
-class LLMsConfig(BaseModel):
-    provider: str
-    primary: LLMDetailConfig
-    secondary: LLMDetailConfig
+    # Ollama settings
+    ollama_base_url: str = "http://localhost:11434"
+    ollama_model: str = "qwen2.5:7b-instruct-q5_K_M "
+    ollama_model_secondary: str = "qwen2.5:7b-instruct-q5_K_M"
 
-class EmbeddingConfig(BaseModel):
-    provider: str
-    model: str
-
-class VectorDBConfig(BaseModel):
-    provider: str
-    persist_directory: str
-
-class DBConfig(BaseModel):
-    type: str
-    path: str
-
-class MLFlowConfig(BaseModel):
-    tracking_uri: str
-    experiment_name: str
-
-class LoggingConfig(BaseModel):
-    level: str
-    file: str
-
-class Config(BaseModel):
-    app: AppConfig
-    api: APIConfig
-    llms: LLMsConfig
-    embedding: EmbeddingConfig
-    vectordatabase: VectorDBConfig
-    database: DBConfig
-    mlflow: MLFlowConfig
-    logging: LoggingConfig
-
-def load_config(config_path: str | Path | None = None) -> Config:
-    if config_path is None:
-        # Default path relative to this file
-        base_dir = Path(__file__).resolve().parent.parent.parent
-        config_path = base_dir / "config" / "config.yaml"
+    # OpenAI settings
+    openai_api_key: str = ""
+    openai_model: str = "gpt-4-turbo-preview"
+    openai_model_secondary: str = "gpt-4o-mini"
     
-    if not os.path.exists(config_path):
-        raise FileNotFoundError(f"Config file not found at {config_path}")
-        
-    with open(config_path, "r") as f:
-        config_dict = yaml.safe_load(f)
-        
-    return Config(**config_dict)
+    # Anthropic settings
+    anthropic_api_key: str = ""
+    anthropic_model: str = "claude-sonnet-4-20250514"
+    anthropic_model_secondary: str = "claude-haiku-3-5-20241022"
+    
+    # Embedding model
+    embedding_model: str = "BAAI/bge-base-en-v1.5"
+    
+    # Database paths
+    vector_db_path: Path = Path("data/vector_db")
+    sqlite_db_path: Path = Path("data/sqlite/interviews.db")
 
-# Global settings instance
-try:
-    settings = load_config()
-except Exception as e:
-    # This might fail during imports if config is missing, 
-    # but we want to know why.
-    print(f"Error loading configuration: {e}")
-    settings = None
+    # Observability
+    langchain_tracing_v2: bool = False
+    langsmith_api_key: str = ""
+    langsmith_project: str = "ai-interview-system"
+    
+    # Logging
+    log_level: str = "INFO"
+
+    def model_post_init(self, context):
+        Path(self.vector_db_path).mkdir(parents=True, exist_ok=True)
+        Path(self.sqlite_db_path).mkdir(parents=True, exist_ok=True)
+
+    @property
+    def llm_config(self) -> dict:
+        """Returns the right config based on chosen LLM provider"""
+        if self.llm_provider == "ollama":
+            config = {
+                "model": self.ollama_model
+            }
+        
+        elif self.llm_provider == "openai":
+            config = {
+                "api_key": self.openai_api_key,
+                "model": self.openai_model
+            }
+        
+        elif self.llm_provider == "anthropic":
+            config = {
+                "api_key": self.anthropic_api_key,
+                "model": self.anthropic_model
+            }
+        
+        return config
+    
+    @property
+    def llm_config_secondary(self) -> dict:
+        """Get secondary (lightweight) LLM configuration"""
+        if self.llm_provider == "ollama":
+            return {
+                "model": self.ollama_model_secondary
+            }
+        elif self.llm_provider == "openai":
+            return {
+                "model": self.openai_model_secondary,
+                "api_key": self.openai_api_key
+            }
+        elif self.llm_provider == "anthropic":
+            return {
+                "model": self.anthropic_model_secondary,
+                "api_key": self.anthropic_api_key
+            }
+        
+
+_settings = None
+
+def get_settings() -> Settings:
+    """Get application settings (singleton)"""
+    global _settings
+    if _settings is None:
+        _settings = Settings()
+    return _settings
