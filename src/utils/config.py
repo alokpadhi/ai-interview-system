@@ -51,7 +51,7 @@ class Settings(BaseSettings):
 
     def model_post_init(self, context):
         Path(self.vector_db_path).mkdir(parents=True, exist_ok=True)
-        Path(self.sqlite_db_path).mkdir(parents=True, exist_ok=True)
+        Path(self.sqlite_db_path).parent.mkdir(parents=True, exist_ok=True)
 
     @property
     def llm_config(self) -> dict:
