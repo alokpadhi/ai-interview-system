@@ -228,10 +228,10 @@ class TestEmbeddingVerification:
         assert results["embeddings"] is not None
         assert len(results["embeddings"]) == 3
         
-        # Verify each embedding has correct dimensions (384 for all-MiniLM-L6-v2)
+        # Verify each embedding has correct dimensions (768 for BAAI/bge-base-en-v1.5)
         for embedding in results["embeddings"]:
             assert embedding is not None
-            assert len(embedding) == 384  # Default sentence-transformers model dimension
+            assert len(embedding) == 768  # BGE-base-en-v1.5 embedding dimension
     
     def test_embedding_similarity(self, vector_store_temp, tmp_path):
         """Test that similar documents have similar embeddings"""
@@ -358,6 +358,6 @@ class TestEmbeddingVerification:
             assert ":" in doc  # Format is "name: explanation"
             assert len(doc) > 10  # Should have substantial content
         
-        # Verify embeddings have correct dimensions
+        # Verify embeddings have correct dimensions (768 for BAAI/bge-base-en-v1.5)
         for embedding in results["embeddings"]:
-            assert len(embedding) == 384
+            assert len(embedding) == 768  # BGE-base-en-v1.5 embedding dimension

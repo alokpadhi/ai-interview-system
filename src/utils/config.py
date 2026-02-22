@@ -21,7 +21,7 @@ class Settings(BaseSettings):
 
     # Ollama settings
     ollama_base_url: str = "http://localhost:11434"
-    ollama_model: str = "qwen2.5:7b-instruct-q5_K_M "
+    ollama_model: str = "qwen2.5:14b-instruct-q5_K_M"
     ollama_model_secondary: str = "qwen2.5:7b-instruct-q5_K_M"
 
     # OpenAI settings

@@ -38,6 +38,7 @@ class Database:
         logger.info(f"Database initialized at {db_path}")
 
         self._create_tables()
+        self._migrate_schema()
 
     def _enable_wal_mode(self):
         """Enable write ahead logging for concurrent access.
@@ -116,6 +117,7 @@ class Database:
             overall_score REAL,
             evaluation_reasoning TEXT,
             feedback TEXT,
+            evaluation_data TEXT,  -- Full evaluation dict as JSON blob (key_points, misconceptions, etc.)
 
             FOREIGN KEY (conversation_id)
                 REFERENCES conversations(id)
@@ -180,6 +182,23 @@ class Database:
 
         self.conn.commit()
         logger.info("Database tables created/verified")
+
+    def _migrate_schema(self):
+        """Apply incremental schema migrations for existing databases.
+
+        Safe to run repeatedly — checks for column existence before ALTER.
+        """
+        cursor = self.conn.cursor()
+
+        # Migration 1: Add evaluation_data JSON blob column
+        cursor.execute("PRAGMA table_info(evaluations)")
+        columns = {row[1] for row in cursor.fetchall()}
+        if "evaluation_data" not in columns:
+            cursor.execute(
+                "ALTER TABLE evaluations ADD COLUMN evaluation_data TEXT"
+            )
+            self.conn.commit()
+            logger.info("Migration: added 'evaluation_data' column to evaluations")
     
     def _commit(self):
         """Commit changes only if not in a transaction context"""
@@ -374,8 +393,9 @@ class Database:
         cursor.execute(
             """INSERT INTO evaluations 
                (conversation_id, technical_accuracy, completeness, depth, 
-                clarity, overall_score, evaluation_reasoning, feedback)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                clarity, overall_score, evaluation_reasoning, feedback,
+                evaluation_data)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (conversation_id,
              evaluation.get('technical_accuracy'),
              evaluation.get('completeness'),
@@ -383,17 +403,31 @@ class Database:
              evaluation.get('clarity'),
              evaluation.get('overall_score'),
              evaluation.get('evaluation_reasoning'),
-             feedback)
+             feedback,
+             json.dumps(evaluation))
         )
         self._commit()
         logger.info(f"Saved evaluation for conversation {conversation_id}")
 
     def get_evaluation(self, conversation_id: int) -> Optional[Dict]:
-        """Get evaluation for a conversation turn"""
+        """Get evaluation for a conversation turn.
+        
+        If evaluation_data JSON blob exists, it is parsed and merged
+        into the returned dict for full evaluation details.
+        """
         cursor = self.conn.cursor()
         cursor.execute("SELECT * FROM evaluations WHERE conversation_id=?", (conversation_id,))
         row = cursor.fetchone()
-        return dict(row) if row else None
+        if not row:
+            return None
+        result = dict(row)
+        # Parse evaluation_data JSON blob if present
+        if result.get('evaluation_data'):
+            try:
+                result['evaluation_data'] = json.loads(result['evaluation_data'])
+            except (json.JSONDecodeError, TypeError):
+                pass  # Keep as string if parsing fails
+        return result
 
     # ========== STATE MANAGEMENT (RESUMABILITY) ==========
     
@@ -406,6 +440,12 @@ class Database:
         Args:
             interview_id: Interview identifier
             state_data: Complete LangGraph state as dict
+        
+        .. deprecated::
+            Will be superseded by LangGraph's built-in checkpointer
+            (AsyncPostgresSaver / AsyncSqliteSaver via RunnableConfig thread_id).
+            Keep for debugging / pre-checkpointer MVP only.
+            See architecture(v2).md § Key Design Decisions.
         """
         cursor = self.conn.cursor()
         cursor.execute(
@@ -426,6 +466,10 @@ class Database:
             
         Returns:
             State dict or None if not found
+        
+        .. deprecated::
+            Will be superseded by LangGraph's built-in checkpointer.
+            See save_state() docstring.
         """
         cursor = self.conn.cursor()
         cursor.execute(

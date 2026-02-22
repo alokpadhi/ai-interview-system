@@ -171,6 +171,11 @@ class MemoryService:
         Args:
             interview_id: Interview identifier
             state_data: Complete LangGraph state
+        
+        .. deprecated::
+            Will be superseded by LangGraph's built-in checkpointer
+            (AsyncPostgresSaver / AsyncSqliteSaver via RunnableConfig thread_id).
+            Keep for debugging / pre-checkpointer MVP only.
         """
         self.db.save_state(interview_id, state_data)
     
@@ -180,6 +185,10 @@ class MemoryService:
         
         Returns:
             State dict or None
+        
+        .. deprecated::
+            Will be superseded by LangGraph's built-in checkpointer.
+            See save_state() docstring.
         """
         return self.db.load_state(interview_id)
     
