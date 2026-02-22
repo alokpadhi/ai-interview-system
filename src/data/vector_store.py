@@ -79,7 +79,8 @@ class VectorStore:
         collection_metadata = {**hnsw_config, **(metadata or {})}
         collection = self.client.get_or_create_collection(
             name=name,
-            metadata=collection_metadata
+            metadata=collection_metadata,
+            embedding_function=self.embedding_function
         )
         logger.info(f"Collection {collection.name} is created.")
         return collection
@@ -115,7 +116,10 @@ class VectorStore:
         if not documents:
             return 
         
-        collection = self.client.get_collection(collection_name)
+        collection = self.client.get_collection(
+            name=collection_name,
+            embedding_function=self.embedding_function
+        )
         total_docs = len(documents)
 
         logger.info(f"Starting batch insert into '{collection_name}' | total_docs={total_docs}, batch_size={batch_size}")
@@ -159,7 +163,10 @@ class VectorStore:
         """
         if not collection_name:
             raise ValueError(f"Collection doesn't exist. Please create the collection first with create_collection().")
-        collection = self.client.get_collection(collection_name)
+        collection = self.client.get_collection(
+            name=collection_name,
+            embedding_function=self.embedding_function
+        )
         results = collection.query(
             query_texts=query_text,
             n_results=n_results,
@@ -183,7 +190,10 @@ class VectorStore:
         if not collection_name:
             raise ValueError(f"Collection doesn't exist. Please create the collection first with create_collection()")
         
-        collection = self.client.get_collection(collection_name)
+        collection = self.client.get_collection(
+            name=collection_name,
+            embedding_function=self.embedding_function
+        )
 
         return {
             "name": collection.name,

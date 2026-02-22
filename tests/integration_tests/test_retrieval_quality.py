@@ -218,7 +218,7 @@ class TestRetrievalQuality:
         # Verify each embedding is a valid vector
         for embedding in all_results["embeddings"]:
             assert embedding is not None
-            assert len(embedding) == 384  # Expected dimension for all-MiniLM-L6-v2
+            assert len(embedding) == 768  # Expected dimension for BAAI/bge-base-en-v1.5
             assert all(isinstance(x, (int, float)) for x in embedding)
     
     def test_retrieval_count(self, ingested_vector_store):

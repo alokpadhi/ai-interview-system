@@ -21,7 +21,7 @@ class Settings(BaseSettings):
 
     # Ollama settings
     ollama_base_url: str = "http://localhost:11434"
-    ollama_model: str = "qwen2.5:7b-instruct-q5_K_M "
+    ollama_model: str = "qwen2.5:14b-instruct-q5_K_M"
     ollama_model_secondary: str = "qwen2.5:7b-instruct-q5_K_M"
 
     # OpenAI settings
@@ -51,7 +51,7 @@ class Settings(BaseSettings):
 
     def model_post_init(self, context):
         Path(self.vector_db_path).mkdir(parents=True, exist_ok=True)
-        Path(self.sqlite_db_path).mkdir(parents=True, exist_ok=True)
+        Path(self.sqlite_db_path).parent.mkdir(parents=True, exist_ok=True)
 
     @property
     def llm_config(self) -> dict:
