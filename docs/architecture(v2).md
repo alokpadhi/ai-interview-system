@@ -165,10 +165,10 @@
 │  │                                                                       │   │
 │  │  Responsibility:           Patterns:            Model Assignment:    │   │
 │  │  • Score answers           • Chain-of-Thought   • CoT Eval: 14B     │   │
-│  │  • Identify knowledge gaps • Reflection         • Reflection: 7B    │   │
-│  │  • Detect misconceptions                                             │   │
-│  │  • Track key-point coverage                                          │   │
-│  │  • Inject topic from                                                 │   │
+│  │  • Identify knowledge gaps • Reflection (7B)    • Reflection: 7B    │   │
+│  │  • Detect misconceptions   • Self-Consistency                        │   │
+│  │  • Track key-point coverage  (optional 2x,                           │   │
+│  │  • Inject topic from         median selection)                       │   │
 │  │    current_question into                                             │   │
 │  │    evaluation output                                                 │   │
 │  │                                                                       │   │
@@ -182,15 +182,15 @@
 │  │  Drift Prevention:                              • topic (injected    │   │
 │  │  • Explicit key-point                             from current_      │   │
 │  │    checklist in CoT                               question)          │   │
-│  │  • Coverage-score                                                    │   │
-│  │    alignment validation                                              │   │
+│  │  • Coverage-score                               • needs_human_review │   │
+│  │    alignment validation                           (if divergence>2.0)│   │
 │  │  • Dynamic rubric path for                                           │   │
 │  │    follow-up/clarify Qs                                              │   │
 │  │                                                                       │   │
-│  │  Structured Output:        LLM Calls: 2 (CoT + Reflection)          │   │
-│  │  • complex_llm.with_      Latency: ~2.5-3.5s                       │   │
-│  │    structured_output(                                                │   │
-│  │    EvaluationOutput)                                                 │   │
+│  │  Structured Output:        LLM Calls:                                │   │
+│  │  • complex_llm.with_       • Standard: 2 (CoT + Reflection)         │   │
+│  │    structured_output(      • Self-consistency: 4 (2x CoT + 2x Refl) │   │
+│  │    EvaluationOutput)       Latency: ~2.5-3.5s (std) / ~3-4s (2x)    │   │
 │  │                                                                       │   │
 │  │  State Keys Owned:                                                   │   │
 │  │  • current_evaluation                                                │   │
@@ -204,6 +204,10 @@
 │  │    feedback (no scores!)   • Anti-sycophancy     via .with_          │   │
 │  │  • Acknowledge strengths   • Varied structures    structured_output  │   │
 │  │  • Hint at gaps naturally    (no Mad Libs)       (FeedbackComponents)│   │
+│  │                            • Conditional RAG                         │   │
+│  │                              (concept lookup)                        │   │
+│  │                            • Semantic Repetition                     │   │
+│  │                              Reflection (7B)                         │   │
 │  │                                                                       │   │
 │  │  FeedbackComposer:         Caching:             Does NOT:            │   │
 │  │  • Multiple structures     • Concept cache      • Expose scores      │   │
@@ -212,10 +216,18 @@
 │  │  • Context-aware             concept lookups    • Update stage       │   │
 │  │    transitions                                                       │   │
 │  │                                                                       │   │
-│  │  State Keys Owned:         LLM Calls: 1                              │   │
-│  │  • current_feedback        Latency: ~1-1.5s                          │   │
+│  │  Repetition Guard:         LLM Calls: 1 (+ 1 reflection after 2+    │   │
+│  │  • After 2+ turns, 7B       turns if semantic similarity detected)   │   │
+│  │    checks new vs recent    Latency: ~1-1.5s (std) / ~1.5-2s (refl)  │   │
+│  │  • Regenerates with                                                  │   │
+│  │    diversity instruction                                             │   │
+│  │    if semantically similar                                           │   │
+│  │                                                                       │   │
+│  │  State Keys Owned:                                                   │   │
+│  │  • current_feedback                                                  │   │
 │  │  • previous_feedback_                                                │   │
 │  │    structures                                                        │   │
+│  │  • recent_feedbacks                                                  │   │
 │  └─────────────────────────────────────────────────────────────────────┘   │
 │                                                                              │
 │  ┌─────────────────────────────────────────────────────────────────────┐   │
@@ -223,11 +235,11 @@
 │  │                                                                       │   │
 │  │  Responsibility:           Operating Modes:     Model Assignment:    │   │
 │  │  • ALL question decisions  • RETRIEVE: Cache    • ReAct select: 7B  │   │
-│  │  • Mode determination        + RAG service      • Follow-up gen: 14B │   │
-│  │  • Time budget enforcement • FOLLOW_UP: LLM gen • Clarify gen: 14B   │   │
-│  │  • Topic tracking          • CLARIFY: LLM gen                        │   │
-│  │    (owns topics_covered)                                             │   │
-│  │  • Topic re-prioritization   Does NOT:                               │   │
+│  │  • Mode determination        + RAG service        via .with_         │   │
+│  │  • Time budget enforcement • FOLLOW_UP: LLM gen   structured_output  │   │
+│  │  • Topic tracking          • CLARIFY: LLM gen     (QuestionSelection)│   │
+│  │    (owns topics_covered)                        • Follow-up gen: 14B │   │
+│  │  • Topic re-prioritization   Does NOT:          • Clarify gen: 14B   │   │
 │  │    when struggling           • Own CRAG logic                        │   │
 │  │  • Generates target_concepts • Grade retrieval                       │   │
 │  │    for follow-up/clarify Qs    results                               │   │
@@ -249,15 +261,17 @@
 │  │  • RAG service owns CRAG            ~2.5-3s (generate)               │   │
 │  │    loop (grade + refine                                              │   │
 │  │    + retry)                                                          │   │
-│  │  • QS owns ReAct selection                                           │   │
-│  │    from returned candidates                                          │   │
+│  │  • QS owns structured                                               │   │
+│  │    selection from returned                                           │   │
+│  │    candidates                                                        │   │
 │  └─────────────────────────────────────────────────────────────────────┘   │
 │                                                                              │
 │  Per-Turn Summary:                                                          │
-│  • Total LLM Calls: 3-4 (+ 1 every 3 turns for summarization)              │
-│  • Total Latency: 3.5-5s                                                   │
-│  • 14B Calls: 1-2 (heavy lifting)                                          │
-│  • 7B Calls: 2-3 (fast decisions)                                          │
+│  • Total LLM Calls: 3-5 (+ 1 every 3 turns for summarization)              │
+│  • Standard Latency: 3.5-5s                                                │
+│  • Self-consistency mode: 4-6s (parallel eval, no sequential penalty)      │
+│  • 14B Calls: 1-2 (heavy lifting, 2x in self-consistency)                  │
+│  • 7B Calls: 2-4 (fast decisions, feedback, reflection, repetition check)  │
 └─────────────────────────────────────────────────────────────────────────────┘
                                      │
                                      ▼
@@ -633,6 +647,7 @@ class InterviewState(TypedDict):
     
     # ─── Feedback variation tracking (Feedback Agent owns) ───
     previous_feedback_structures: Annotated[list[str], operator.add]
+    recent_feedbacks: Annotated[list[str], operator.add]  # For semantic repetition check
     
     # ─── Control flags (Supervisor owns) ───
     should_continue: Annotated[bool, last_value]
@@ -2123,20 +2138,36 @@ class FeedbackComposer:
         return self.TRANSITIONS[turn_number % len(self.TRANSITIONS)]
 
 
+REPETITION_CHECK_PROMPT = ChatPromptTemplate.from_messages([
+    ("system",
+     "Check if new feedback is semantically similar to recent feedback. "
+     "Respond with 'similar' or 'different' and one sentence why."),
+    ("human", (
+        "New feedback: {new_feedback}\n\n"
+        "Recent feedback (last 2 turns):\n{recent_feedbacks}"
+    ))
+])
+
+
 class FeedbackAgent:
     """
     Generates user-facing feedback with varied structures.
     Uses .with_structured_output() for reliable parsing.
+    Includes semantic repetition reflection to catch cases where
+    template rotation produces structurally different but semantically
+    identical feedback across turns.
     """
     
     def __init__(
         self, fast_llm: BaseChatModel, concept_tool,
         cache_store: InterviewCacheStore
     ):
+        self.fast_llm = fast_llm
         self.structured_chain = (
             FEEDBACK_PROMPT
             | fast_llm.with_structured_output(FeedbackComponents)
         )
+        self.repetition_check_chain = REPETITION_CHECK_PROMPT | fast_llm
         self.concept_tool = concept_tool
         self.cache_store = cache_store
         self.composer = FeedbackComposer()
@@ -2161,14 +2192,22 @@ class FeedbackAgent:
         previous_structures = state.get("previous_feedback_structures", [])
         feedback_text = self.composer.compose(components, score, turn, previous_structures)
         
+        # Semantic repetition reflection (after 2+ turns)
+        recent_feedbacks = state.get("recent_feedbacks", [])
+        if len(recent_feedbacks) >= 2:
+            feedback_text = await self._check_semantic_repetition(
+                feedback_text, recent_feedbacks[-2:], state, config
+            )
+        
         score_band = self.composer._get_score_band(score)
         structures = self.composer.STRUCTURES[score_band]
         used_structure = structures[turn % len(structures)]
         
         return {
             "current_feedback": feedback_text,
-            # operator.add reducer: return only the NEW structure
+            # operator.add reducer: return only NEW items
             "previous_feedback_structures": [used_structure],
+            "recent_feedbacks": [feedback_text],  # operator.add: keeps history
         }
     
     async def _get_concept_context(
@@ -2195,6 +2234,41 @@ class FeedbackAgent:
         elif score >= 4.0:
             return "Supportive. Focus on the attempt, guide gently."
         return "Patient. No praise openers. Direct but kind."
+    
+    async def _check_semantic_repetition(
+        self, new_feedback: str, recent: list[str],
+        state: InterviewState, config: RunnableConfig
+    ) -> str:
+        """Lightweight 7B reflection: regenerate if semantically repetitive."""
+        check = await self.repetition_check_chain.ainvoke({
+            "new_feedback": new_feedback,
+            "recent_feedbacks": "\n".join(f"- {f}" for f in recent),
+        }, config=config)
+        
+        if "similar" in check.content.lower():
+            # Regenerate with explicit diversity instruction
+            diversity_prompt = FEEDBACK_PROMPT.partial(
+                tone_guidance=(
+                    self._get_tone_guidance(state["current_evaluation"]["overall_score"])
+                    + " IMPORTANT: Use a completely different angle from recent feedback."
+                )
+            )
+            diversity_chain = diversity_prompt | self.fast_llm.with_structured_output(FeedbackComponents)
+            components = await diversity_chain.ainvoke({
+                "question": state["current_question"]["text"],
+                "response": state["candidate_response"],
+                "score_band": self.composer._get_score_band(
+                    state["current_evaluation"]["overall_score"]
+                ),
+                "concept_context": "",
+            }, config=config)
+            new_feedback = self.composer.compose(
+                components,
+                state["current_evaluation"]["overall_score"],
+                state["question_count"],
+                state.get("previous_feedback_structures", [])
+            )
+        return new_feedback
 ```
 
 ---
@@ -2229,10 +2303,15 @@ CLARIFICATION_PROMPT = ChatPromptTemplate.from_messages([
     ))
 ])
 
+class QuestionSelection(BaseModel):
+    """Structured output for question selection — eliminates raw JSON parsing."""
+    selected_id: str = Field(description="ID of the best candidate question")
+    reasoning: str = Field(description="One sentence explaining the selection")
+
+
 REACT_SELECTION_PROMPT = ChatPromptTemplate.from_messages([
     ("system",
-     "Select the best question for the interview context. "
-     "Return JSON with selected_id."),
+     "Select the best question for the interview context."),
     ("human", (
         "Candidates: {candidates}\n"
         "Difficulty: {difficulty_level}\n"
@@ -2269,7 +2348,7 @@ class QuestionSelectorAgent:
         self.clarify_chain = CLARIFICATION_PROMPT | complex_llm
         self.select_chain = (
             REACT_SELECTION_PROMPT
-            | fast_llm  # Returns JSON with selected_id
+            | fast_llm.with_structured_output(QuestionSelection)
         )
     
     async def execute(
@@ -2401,7 +2480,8 @@ class QuestionSelectorAgent:
         if len(candidates) == 1:
             return candidates[0]
         
-        response = await self.select_chain.ainvoke({
+        # Structured output — no raw JSON parsing
+        selection: QuestionSelection = await self.select_chain.ainvoke({
             "candidates": [
                 {"id": c["id"], "text": c["text"], "difficulty": c.get("difficulty", "")}
                 for c in candidates[:5]
@@ -2411,9 +2491,8 @@ class QuestionSelectorAgent:
             "performance_trend": self._get_performance_trend(state),
         }, config=config)
         
-        selected_id = parse_json_safely(response.content).get("selected_id", "")
         for c in candidates:
-            if c["id"] == selected_id:
+            if c["id"] == selection.selected_id:
                 return c
         return candidates[0]
     
@@ -2555,17 +2634,49 @@ class QuestionSelectorAgent:
 ```python
 class EvaluatorAgent:
     """
-    Evaluates candidate responses with CoT + Reflection.
+    Evaluates candidate responses with CoT + Reflection + optional Self-Consistency.
     
-    Key fix: Injects topic from current_question into evaluation output.
-    Without this, _select_weakest_topic and per-topic scoring silently fail.
+    Key features:
+    - Injects topic from current_question into evaluation output
+    - Self-consistency: configurable N-sample evaluation with median selection
+    - Flags high-divergence evaluations for review
     """
     
-    def __init__(self, complex_llm: BaseChatModel, fast_llm: BaseChatModel):
+    def __init__(
+        self, complex_llm: BaseChatModel, fast_llm: BaseChatModel,
+        consistency_samples: int = 1
+    ):
         self.eval_chain = EVAL_COT_PROMPT | complex_llm.with_structured_output(EvaluationOutput)
         self.reflect_chain = REFLECTION_PROMPT | fast_llm
+        self.consistency_samples = consistency_samples  # 1 = standard, 2 = self-consistency
     
     async def execute(
+        self, state: InterviewState, config: RunnableConfig
+    ) -> dict:
+        if self.consistency_samples <= 1:
+            return await self._single_evaluate(state, config)
+        
+        # Self-consistency: run N evaluations in parallel, take median
+        results = await asyncio.gather(*[
+            self._single_evaluate(state, config)
+            for _ in range(self.consistency_samples)
+        ])
+        scores = [r["current_evaluation"]["overall_score"] for r in results]
+        
+        # Select median result
+        sorted_pairs = sorted(zip(scores, results))
+        median_idx = len(sorted_pairs) // 2
+        best = sorted_pairs[median_idx][1]
+        
+        # Flag high divergence for review
+        divergence = max(scores) - min(scores)
+        if divergence > 2.0:
+            best["current_evaluation"]["needs_human_review"] = True
+            best["current_evaluation"]["consistency_divergence"] = divergence
+        
+        return best
+    
+    async def _single_evaluate(
         self, state: InterviewState, config: RunnableConfig
     ) -> dict:
         question = state["current_question"]
@@ -3093,3 +3204,6 @@ def generate_final_report(state: InterviewState) -> FinalReport:
 | Turn counting | `sum(1 for m in messages if isinstance(m, HumanMessage))` | Robust against system messages, metadata messages in `add_messages` list |
 | CRAG subgraph checkpointing | Invoked imperatively (not registered as subgraph node) | Accepted tradeoff: CRAG is fast (~2s) and idempotent; re-running on crash recovery is cheaper than subgraph state transformation complexity |
 | Human-in-the-loop readiness | `interrupt_before=["supervisor_check"]` available but commented out | Architecture supports admin review; activate when needed without refactoring |
+| Self-consistency (Evaluator) | Configurable N-sample evaluation with median selection; flags divergence > 2.0 | Industry standard for LLM-as-judge reliability; `consistency_samples=1` for dev, `2` for prod |
+| Semantic repetition check (Feedback) | 7B reflection on recent 2 feedbacks; regeneration with explicit diversity if similar | Template rotation prevents structural repetition, but not semantic; catches paraphrased duplication |
+| Structured selection (QS) | `.with_structured_output(QuestionSelection)` replaces raw JSON parsing | Consistency: every LLM call in system uses structured output — no hand-rolled exceptions |

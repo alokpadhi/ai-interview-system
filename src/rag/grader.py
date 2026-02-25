@@ -14,7 +14,6 @@ Design:
   - Context penalties applied to score copies — originals never mutated
   - topic_intent used for penalty (not last_topic) — matches retrieval intent
 """
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -32,23 +31,21 @@ from src.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-
 # Thresholds
-
-HIGH_SCORE_THRESHOLD        = 0.75
-LOW_SCORE_THRESHOLD         = 0.45
+HIGH_SCORE_THRESHOLD = 0.75
+LOW_SCORE_THRESHOLD = 0.45
 DIFFICULTY_MISMATCH_PENALTY = 0.10
-TOPIC_MISMATCH_PENALTY      = 0.15
+TOPIC_MISMATCH_PENALTY = 0.15
 
 
-# Structured output schema
+# structured output pydantic schema
 class DocumentGrade(BaseModel):
     """LLM grading decision for borderline retrieval results."""
-    grade:    str = Field(description="Relevance grade: HIGH, MEDIUM, or LOW")
+    grade: str = Field(description="Relevance grade: HIGH, MEDIUM, or LOW")
     feedback: str = Field(description="One sentence explaining the grade")
 
     def to_relevance_grade(self) -> RelevanceGrade:
-        """Safe coercion — defaults to MEDIUM on unrecognised value."""
+        """Safe coercion - defaults to MEDIUM on unrecognized value."""
         try:
             return RelevanceGrade(self.grade.upper())
         except ValueError:
@@ -56,47 +53,45 @@ class DocumentGrade(BaseModel):
                 "Unrecognised grade from LLM: %s — defaulting to MEDIUM", self.grade
             )
             return RelevanceGrade.MEDIUM
+        
 
-
-# Fallback schema — returned when LLM fails entirely
+# Fallback schema - returned when LLM fails entirely
 class _FallbackGrade(BaseModel):
-    grade:    str = "MEDIUM"
-    feedback: str = "LLM grading unavailable — conservative MEDIUM assigned."
+    grade: str = "MEDIUM"
+    feedback: str = "LLM grading unavailable - convervative MEDIUM assigned."
 
-
-# GradingResult
 @dataclass
 class GradingResult:
-    grade:           RelevanceGrade
-    feedback:        str
-    avg_score:       float
-    used_llm:        bool           = False
+    grade: RelevanceGrade
+    feedback: str
+    avg_score: float
+    used_llm: bool = False
     penalised_score: Optional[float] = None
-
 
 _GRADING_PROMPT = ChatPromptTemplate.from_messages([
     (
         "system",
         "You are evaluating whether retrieved interview questions are relevant "
-        "to the current retrieval context. Be strict — only grade HIGH if the "
-        "questions are clearly appropriate for the difficulty and topic."
+        "to the current retrieval context. Be strict - only grade HIGH if the "
+        "questions are clearly appropiate for the difficulty and topic."
     ),
     (
         "human",
         """Retrieval context:
-- Difficulty: {difficulty}
-- Topic intent: {topic_intent}
-- Interview stage: {stage}
+        - Difficulty: {difficulty}
+        - Topic Intent: {topic_intent}
+        - Interview stage: {stage}
+        
+        Retrieved documents (sample):
+        {doc_sample}
+        
+        Average relevance score from vector search: {avg_score:.3f}
 
-Retrieved documents (sample):
-{doc_sample}
-
-Average relevance score from vector search: {avg_score:.3f}
-
-Grade the overall retrieval quality as HIGH, MEDIUM, or LOW.
-HIGH   = questions are on-topic and at the right difficulty
-MEDIUM = mostly relevant but some mismatch
-LOW    = off-topic or wrong difficulty throughout"""
+        Grade the overall retrieval quality as HIGH, MEDIUM, or LOW.
+        HIGH   = questions are on-topic and at the right difficulty
+        MEDIUM = mostly relevant but some mismatch
+        LOW    = off-topic or wrong difficulty throughout
+        """
     ),
 ])
 
@@ -132,40 +127,37 @@ def _build_grading_chain(llm: BaseChatModel):
     return primary_chain.with_fallbacks([fallback_chain])
 
 class DocumentGrader:
-    """
-    Hybrid grader: score-based fast paths, LLM only for borderline cases.
-
+    """Hybrid grader: score-based fast paths, LLM only for borderline cases.
     Usage:
-        grader = DocumentGrader() # uses get_secondary_llm()
+    grader = DocumentGrader() # uses get_secondary_llm()
         for testing can use llm=custom_llm
     """
-    def __init__(self, llm: Optional[BaseChatModel] = None) -> None:
-        resolved_llm    = llm or get_secondary_llm()
-        self._chain     = _build_grading_chain(resolved_llm)
+    def __init__(self, llm: Optional[BaseChatModel]=None) -> None:
+        resolved_llm = llm or get_secondary_llm()
+        self._chain = _build_grading_chain(resolved_llm)
 
     async def grade(
             self,
             documents: List[RetrievalResult],
             context: RetrievalContext,
-            topic_intent: str = ""
+            topic_intent: str=""
     ) -> GradingResult:
-        """Grade a list of retrieved documents against the retrieval context.
+        """Grade a list of retrieved documents against the retrieval context
         Returns GradingResult - never raises
         """
-
         if not documents:
             return GradingResult(
                 grade=RelevanceGrade.LOW,
-                feedback="No documents retrieved.",
+                feedback="No documents retrieved",
                 avg_score=0.0
             )
         
-        # penalities applied to copies - originals kept as it is
+        # penalties applied to copies - originals kept as it is
         penalized_scores = self._apply_penalties(documents, context, topic_intent)
         avg_penalized = sum(penalized_scores) / len(penalized_scores)
         avg_raw = sum(d.relevance_score for d in documents) / len(documents)
 
-        # Fast path: HIGH
+        # Fast path; no LLM
         if avg_penalized >= HIGH_SCORE_THRESHOLD:
             logger.debug("Grader fast-path HIGH | avg_penalized=%.3f", avg_penalized)
             return GradingResult(
@@ -176,7 +168,6 @@ class DocumentGrader:
                 penalised_score=avg_penalized
             )
         
-        # fast path: LOW
         if avg_penalized <= LOW_SCORE_THRESHOLD:
             logger.debug("Grader fast-path LOW | avg penalized=%.3f", avg_penalized)
             return GradingResult(
@@ -191,7 +182,7 @@ class DocumentGrader:
         logger.debug("Grader borderline - calling LLM | avg penalized=%.3f", avg_penalized)
         return await self._llm_grade(documents, context, avg_raw, avg_penalized, topic_intent)
     
-    def _apply_penalities(
+    def _apply_penalties(
             self,
             documents: List[RetrievalResult],
             context: RetrievalContext,
@@ -220,17 +211,17 @@ class DocumentGrader:
 
             adjusted.append(max(0.0, score))
 
+        return adjusted
+    
     async def _llm_grade(
             self,
             documents: List[RetrievalResult],
             context: RetrievalContext,
             avg_raw: float,
             avg_penalized: float,
-            topic_intent: str = ""
+            topic_intent: str=""
     ) -> GradingResult:
-        """
-        Invoke LLM grading chain
-        """
+        """Invoke LLM grading chain"""
         doc_sample = "\n".join(
             f"- [{d.metadata.get('difficulty','?')} | {d.metadata.get('topic','?')}] {d.text[:120]}"
             for d in documents[:3]
@@ -238,11 +229,11 @@ class DocumentGrader:
 
         result: DocumentGrade | _FallbackGrade = await self._chain.ainvoke(
             {
-            "difficulty":   context.difficulty_level,
-            "topic_intent": topic_intent,
-            "stage":        getattr(context, "stage", "questioning"),
-            "doc_sample":   doc_sample,
-            "avg_score":    avg_penalized,
+                "difficulty":   context.difficulty_level,
+                "topic_intent": topic_intent,
+                "stage":        getattr(context, "stage", "questioning"),
+                "doc_sample":   doc_sample,
+                "avg_score":    avg_penalized,
             }
         )
 
@@ -268,6 +259,3 @@ class DocumentGrader:
             used_llm=True,
             penalised_score=avg_penalized,
         )
-
-
-

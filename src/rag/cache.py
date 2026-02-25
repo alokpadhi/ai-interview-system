@@ -34,36 +34,29 @@ from typing import (
     Set,
     Tuple,
 )
-
 from src.rag.models import RetrievalResult
 from src.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
 
 
-# ─── Pool limits ───────────────────────────────────────────────
+# pool limits
 MAX_TOPICS_PER_SESSION = 10
 MAX_CONCEPTS_PER_SESSION = 30
 
-# ─── Grade-based TTL (seconds) ────────────────────────────────
-# Architecture v2 values
-TTL_HIGH = 1800      # 30 minutes
-TTL_MEDIUM = 900     # 15 minutes
-TTL_LOW = 300        # 5 minutes — but LOW is never cached in put()
+# Grade based TTL
+TTL_HIGH = 1800 # 30 MINS
+TTL_MEDIUM = 900 # 15 MINS
+TTL_LOW = 300 # 5 MINS
 
-# ─── Session cleanup ──────────────────────────────────────────
+# session cleanup
 ABANDONED_SESSION_THRESHOLD_MINUTES = 90
 
-
-# ═══════════════════════════════════════════════════════════════
-# Enums & shared types
-# ═══════════════════════════════════════════════════════════════
-
+# ENUM and shared types
 class RelevanceGrade(str, Enum):
     HIGH = "HIGH"
     MEDIUM = "MEDIUM"
     LOW = "LOW"
-
 
 class CacheInvalidationReason(str, Enum):
     TTL_EXPIRED = "ttl_expired"
@@ -73,7 +66,6 @@ class CacheInvalidationReason(str, Enum):
     SESSION_CLEARED = "session_cleared"
     SESSION_ABANDONED = "session_abandoned"
 
-
 TTL_BY_GRADE: Dict[RelevanceGrade, int] = {
     RelevanceGrade.HIGH: TTL_HIGH,
     RelevanceGrade.MEDIUM: TTL_MEDIUM,
@@ -81,36 +73,32 @@ TTL_BY_GRADE: Dict[RelevanceGrade, int] = {
 }
 
 
-# ═══════════════════════════════════════════════════════════════
 # Cache Entries
-# ═══════════════════════════════════════════════════════════════
-
 @dataclass
 class CacheEntry:
     """A cached batch of topic questions for one session + topic:difficulty."""
-
     documents: List[RetrievalResult]
     grade: RelevanceGrade
     created_at: float = field(default_factory=time.time)
     last_accessed_at: float = field(default_factory=time.time)
-    hit_count: int = 0
+    hit_count = 0
     used_ids: Set[str] = field(default_factory=set)
 
-    # ── TTL / reusability ──────────────────────────────────
+    # TTL Reusability
     def is_expired(self) -> bool:
         ttl = TTL_BY_GRADE[self.grade]
         return (time.time() - self.created_at) > ttl
-
+    
     def is_reusable(self) -> bool:
         """LOW results are never reusable."""
         return self.grade in (RelevanceGrade.HIGH, RelevanceGrade.MEDIUM)
-
-    # ── Partial-reuse helpers ──────────────────────────────
+    
+    # Partial reuse
     def get_unused(self, exclude_ids: Set[str]) -> List[RetrievalResult]:
-        """Return documents not yet served and not in caller's exclude set."""
+        """return documents not yet served and not in caller's exclude set."""
         combined = self.used_ids | exclude_ids
         return [d for d in self.documents if d.id not in combined]
-
+    
     def mark_used(self, doc_ids: List[str]) -> None:
         self.used_ids.update(doc_ids)
 
@@ -119,31 +107,24 @@ class CacheEntry:
         self.last_accessed_at = time.time()
         self.hit_count += 1
 
-
 @dataclass
-class ConceptEntry:
-    """A cached concept lookup result."""
-
+class CocneptEntry:
+    """A cached concept lookup"""
     concept_name: str
     data: Dict[str, Any]
     created_at: float = field(default_factory=time.time)
-    last_accessed_at: float = field(default_factory=time.time)
+    last_accessed_at = float = field(default_factory=time.time)
 
     def is_expired(self) -> bool:
-        return (time.time() - self.created_at) > 3600  # 60 min (stable data)
-
+        return(time.time() - self.created_at) > 3600 # 60 mins
+    
     def touch(self) -> None:
         self.last_accessed_at = time.time()
 
 
-# ═══════════════════════════════════════════════════════════════
-# Observability
-# ═══════════════════════════════════════════════════════════════
-
-@dataclass
+# observability
 class CacheMetrics:
-    """Observability counters for the cache store."""
-
+    """Obersvability counters for the cache store."""
     total_requests: int = 0
     cache_hits: int = 0
     cache_misses: int = 0
@@ -152,7 +133,7 @@ class CacheMetrics:
     @property
     def hit_rate(self) -> float:
         return self.cache_hits / self.total_requests if self.total_requests else 0.0
-
+    
     def record_hit(self, pool: str, interview_id: str, key: str) -> None:
         self.total_requests += 1
         self.cache_hits += 1
@@ -178,53 +159,43 @@ class CacheMetrics:
         self.invalidations[key] = self.invalidations.get(key, 0) + 1
 
 
-# ═══════════════════════════════════════════════════════════════
-# InterviewCacheStore — Dual-pool, per-session-locked singleton
-# ═══════════════════════════════════════════════════════════════
-
+# InterviewCacheStore: Dual-pool & per session locked singelton
 class InterviewCacheStore:
     """Singleton holding dual cache pools for ALL concurrent interviews.
 
     Topic Pool: Stores batches of retrieved questions per topic:difficulty.
                 Max 10 entries per session, grade-based TTL.
     Concept Pool: Stores concept lookup results for feedback enrichment.
-                  Max 30 entries per session, 60 min TTL.
+                    Max 30 entries per session, 60 min TTL.
 
     Thread safety:
-      - Each session gets its own asyncio.Lock (via defaultdict).
-      - A global lock protects session creation and cleanup only.
-      - Concurrent interviews never block each other.
+        - Each session gets its own asyncio.Lock (via defaultdict).
+        - A global lock protects session creation and cleanup only.
+        - Concurrent interviews never block each other.
     """
-
-    def __init__(self) -> None:
-        # Per-session pools
+    def __init__(self):
+        # per sessions tools
         self._topic_cache: Dict[str, OrderedDict[str, CacheEntry]] = {}
-        self._concept_cache: Dict[str, OrderedDict[str, ConceptEntry]] = {}
+        self._concept_cache: Dict[str, OrderedDict[str, CocneptEntry]] = {}
         self._session_created_at: Dict[str, datetime] = {}
 
-        # Locking
+        # locking
         self._session_locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
-        self._global_lock = asyncio.Lock()
+        self._gloabl_lock = asyncio.Lock()
 
-        # Observability
+        # observability
         self.metrics = CacheMetrics()
 
-    # ═══════════════════════════════════════════════════════
-    #  TOPIC POOL — Questions
-    # ═══════════════════════════════════════════════════════
-
+    # Topic Pool
     async def set_topic_questions(
-        self,
-        session_id: str,
-        topic: str,
-        difficulty: str,
-        questions: List[RetrievalResult],
-        crag_grade: RelevanceGrade,
+            self,
+            session_id: str,
+            topic: str,
+            difficulty: str,
+            questions: List[RetrievalResult],
+            crag_grade: RelevanceGrade,
     ) -> None:
-        """Store a batch of questions for a topic:difficulty pair.
-
-        LOW-grade batches are rejected — no point caching bad results.
-        """
+        """Store a batch of questions for a topic:difficulty pair."""
         if crag_grade == RelevanceGrade.LOW:
             logger.debug(
                 "Topic cache put() rejected LOW grade | session=%s topic=%s",
@@ -238,7 +209,7 @@ class InterviewCacheStore:
             entry = CacheEntry(documents=questions, grade=crag_grade)
             pool[key] = entry
 
-            # LRU eviction if pool exceeds limit
+            # LRU eviction is pool exceeds limit
             while len(pool) > MAX_TOPICS_PER_SESSION:
                 oldest_key, _ = pool.popitem(last=False)
                 self.metrics.record_invalidation(CacheInvalidationReason.POOL_FULL)
@@ -246,23 +217,21 @@ class InterviewCacheStore:
                     "Topic pool LRU eviction | session=%s key=%s",
                     session_id, oldest_key,
                 )
-
         logger.debug(
             "Topic cache stored | session=%s key=%s grade=%s docs=%d",
             session_id, key, crag_grade.value, len(questions),
         )
-
+    
     async def get_topic_questions(
-        self,
-        session_id: str,
-        topic: str,
-        difficulty: str,
-        exclude_ids: Set[str],
-        n_results: int = 5,
+            self,
+            session_id: str,
+            topic: str,
+            difficulty: str,
+            exclude_ids: Set[str],
+            n_results: int = 5,
     ) -> Optional[List[RetrievalResult]]:
         """Try to serve questions from the topic cache.
-
-        Returns None on miss (expired, exhausted, not found).
+        Return None on miss(expired, exhausted, not found).
         """
         key = f"{topic}:{difficulty}"
         async with self._session_locks[session_id]:
@@ -278,13 +247,13 @@ class InterviewCacheStore:
                 self.metrics.record_miss("topic", session_id,
                                          CacheInvalidationReason.QUALITY_TOO_LOW.value)
                 return None
-
+                
             if entry.is_expired():
                 pool.pop(key, None)
                 self.metrics.record_miss("topic", session_id,
                                          CacheInvalidationReason.TTL_EXPIRED.value)
                 return None
-
+            
             available = entry.get_unused(exclude_ids)
             min_needed = max(1, int(n_results * 0.5))
 
@@ -293,53 +262,49 @@ class InterviewCacheStore:
                 self.metrics.record_miss("topic", session_id,
                                          CacheInvalidationReason.PARTIAL_EXHAUSTED.value)
                 return None
-
-            # Hit — move to end for LRU
+            
             pool.move_to_end(key)
             entry.touch()
             self.metrics.record_hit("topic", session_id, key)
             return available[:n_results]
-
+        
     async def select_and_mark(
-        self,
-        session_id: str,
-        topic: str,
-        difficulty: str,
-        selector_fn: Callable[[List[RetrievalResult]], Awaitable[RetrievalResult]],
+            self, 
+            session_id: str,
+            topic: str,
+            difficulty: str,
+            selector_fn: Callable[[List[RetrievalResult]], Awaitable[RetrievalResult]],
     ) -> Optional[RetrievalResult]:
         """Atomically select a question and mark it as used.
-
         Runs selector_fn inside the session lock so no TOCTOU race:
         another coroutine can't grab the same question between get and mark.
-
-        Returns None if cache miss (caller should CRAG then retry).
+        
+        Returns none if cache miss (caller should CRAG then retry).
         """
         key = f"{topic}:{difficulty}"
         async with self._session_locks[session_id]:
             pool = self._topic_cache.get(session_id, OrderedDict())
             entry = pool.get(key)
 
-            if entry is None or entry.is_expired() or not entry.is_reusable():
+            if entry is None or entry.is_expired() or entry.is_reusable():
                 return None
-
+            
             available = entry.get_unused(set())
+
             if not available:
                 return None
-
+            
             selected = await selector_fn(available)
             entry.mark_used([selected.id])
             entry.touch()
             pool.move_to_end(key)
             return selected
-
-    # ═══════════════════════════════════════════════════════
-    #  CONCEPT POOL — Feedback enrichment
-    # ═══════════════════════════════════════════════════════
-
+        
+    # Concept Pool
     async def get_concept(
-        self,
-        session_id: str,
-        concept_name: str,
+            self,
+            session_id: str,
+            concept_name: str,
     ) -> Optional[Dict[str, Any]]:
         """Look up a cached concept."""
         async with self._session_locks[session_id]:
@@ -347,32 +312,32 @@ class InterviewCacheStore:
             entry = pool.get(concept_name)
 
             if entry is None:
-                self.metrics.record_miss("concept", session_id, "not_found")
-                return None
+                self.metrics.record_miss("concept", session_id, "not found")
 
             if entry.is_expired():
-                pool.pop(concept_name, None)
                 self.metrics.record_miss("concept", session_id,
                                          CacheInvalidationReason.TTL_EXPIRED.value)
+                
                 return None
-
+            
             pool.move_to_end(concept_name)
             entry.touch()
             self.metrics.record_hit("concept", session_id, concept_name)
             return entry.data
-
+        
     async def set_concept(
-        self,
-        session_id: str,
-        concept_name: str,
-        data: Dict[str, Any],
+            self,
+            session_id: str,
+            concept_name: str,
+            data: Dict[str, Any],
     ) -> None:
         """Cache a concept lookup result."""
         async with self._session_locks[session_id]:
-            pool = self._ensure_concept_pool(session_id)
-            pool[concept_name] = ConceptEntry(
-                concept_name=concept_name, data=data,
+            pool = self._ensure_concept_tool(session_id)
+            pool[concept_name] = CocneptEntry(
+                concept_name=concept_name, data=data
             )
+
             # LRU eviction
             while len(pool) > MAX_CONCEPTS_PER_SESSION:
                 oldest_key, _ = pool.popitem(last=False)
@@ -382,24 +347,20 @@ class InterviewCacheStore:
                     session_id, oldest_key,
                 )
 
-    # ═══════════════════════════════════════════════════════
-    #  SESSION LIFECYCLE
-    # ═══════════════════════════════════════════════════════
-
+    # session lifecycle
     async def clear_session(self, session_id: str) -> int:
-        """Remove ALL cache entries for a completed / abandoned session.
-
-        Returns total entries removed.
+        """Remove all cache entries for a completed/abondoned session.
+        return total entries removed.
         """
         removed = 0
-        async with self._global_lock:
+        async with self._gloabl_lock:
             if session_id in self._topic_cache:
                 removed += len(self._topic_cache.pop(session_id))
+
             if session_id in self._concept_cache:
                 removed += len(self._concept_cache.pop(session_id))
-            self._session_created_at.pop(session_id, None)
-            # Don't remove the lock — defaultdict re-creates cheaply
 
+            self._session_created_at.pop(session_id, None)
         if removed:
             self.metrics.record_invalidation(CacheInvalidationReason.SESSION_CLEARED)
             logger.info(
@@ -407,24 +368,23 @@ class InterviewCacheStore:
                 session_id, removed,
             )
         return removed
-
-    async def cleanup_abandoned_sessions(self) -> int:
+    
+    async def cleanup_abondoned_sessions(self) -> int:
         """Periodic sweep: remove sessions older than threshold.
-
-        Should be called from a background task (e.g., every 15 min).
+        Should be called from a background task.
         """
         now = datetime.now()
         to_remove = []
 
-        async with self._global_lock:
+        async with self._gloabl_lock:
             for sid, created_at in self._session_created_at.items():
-                age_minutes = (now - created_at).total_seconds() / 60
+                age_minutes = (now-created_at).total_seconds() / 60
                 if age_minutes > ABANDONED_SESSION_THRESHOLD_MINUTES:
                     to_remove.append(sid)
 
         cleaned = 0
         for sid in to_remove:
-            cleaned += await self.clear_session(sid)
+            cleaned += await self.clear_sessioon(sid)
             self.metrics.record_invalidation(
                 CacheInvalidationReason.SESSION_ABANDONED
             )
@@ -435,18 +395,17 @@ class InterviewCacheStore:
                 len(to_remove), cleaned,
             )
         return cleaned
-
+    
     async def pre_warm_topics_background(
-        self,
-        session_id: str,
-        rag_service: Any,
-        topics: List[str],
-        difficulty: str,
+            self,
+            session_id: str,
+            rag_service: Any,
+            topics: List[str],
+            difficulty: str,
     ) -> None:
-        """Pre-warm cache with upcoming topics via full CRAG.
-
-        Called from FastAPI BackgroundTasks after /start.
-        Each topic gets real CRAG grades → accurate TTLs.
+        """Pre warm cache with upcoming topics via full CRAG.
+        Called from fastapi backgroundtasks after start.
+        Each topic gets real CRAG grades -> accurate TTLs.
         """
         for topic in topics:
             try:
@@ -456,6 +415,7 @@ class InterviewCacheStore:
                     exclude_ids=[],
                     n_results=5,
                 )
+
                 if result.documents:
                     await self.set_topic_questions(
                         session_id=session_id,
@@ -474,44 +434,32 @@ class InterviewCacheStore:
                     topic, str(e),
                 )
 
-    # ═══════════════════════════════════════════════════════
-    #  INTERNALS
-    # ═══════════════════════════════════════════════════════
-
     def _ensure_topic_pool(self, session_id: str) -> OrderedDict:
         if session_id not in self._topic_cache:
             self._topic_cache[session_id] = OrderedDict()
             self._session_created_at[session_id] = datetime.now()
-        return self._topic_cache[session_id]
 
+        return self._topic_cache[session_id]
+    
     def _ensure_concept_pool(self, session_id: str) -> OrderedDict:
         if session_id not in self._concept_cache:
             self._concept_cache[session_id] = OrderedDict()
             if session_id not in self._session_created_at:
                 self._session_created_at[session_id] = datetime.now()
         return self._concept_cache[session_id]
-
-    # ── Diagnostics ────────────────────────────────────────
-
+    
     @property
     def active_sessions(self) -> int:
-        return len(
-            set(self._topic_cache.keys()) | set(self._concept_cache.keys())
-        )
-
+        return len(set(self._topic_cache.keys()) | set(self._concept_cache.keys()))
+    
     def topic_pool_size(self, session_id: str) -> int:
         return len(self._topic_cache.get(session_id, {}))
 
     def concept_pool_size(self, session_id: str) -> int:
         return len(self._concept_cache.get(session_id, {}))
-
-
-# ═══════════════════════════════════════════════════════════════
+    
 # Singleton accessor
-# ═══════════════════════════════════════════════════════════════
-
 _cache_store: Optional[InterviewCacheStore] = None
-
 
 def get_cache_store() -> InterviewCacheStore:
     """Returns the process-wide singleton InterviewCacheStore.
@@ -523,15 +471,6 @@ def get_cache_store() -> InterviewCacheStore:
         _cache_store = InterviewCacheStore()
         logger.info("InterviewCacheStore initialized (dual-pool)")
     return _cache_store
-"""
-Backward compatibility: CacheKey is no longer used by the new dual-pool
-design, but existing code may import it. Export a simple NamedTuple
-so imports don't break until all callers are updated.
-"""
-from collections import namedtuple  # noqa: E402
 
-CacheKey = namedtuple("CacheKey", ["interview_id", "difficulty", "topic_intent", "stage"])
-"""Deprecated: CacheKey is no longer used by InterviewCacheStore.
-The dual-pool design uses simple string keys (topic:difficulty, concept_name).
-Kept for backward compatibility during migration.
-"""
+
+
