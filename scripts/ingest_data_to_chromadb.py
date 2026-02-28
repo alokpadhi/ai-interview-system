@@ -1,6 +1,15 @@
 """
 Data ingestion pipeline for ChromaDB.
 Loads processed data and ingests into vector store.
+
+
+Topic normalization
+-------------------
+Every question document's ``topic`` field is normalized through
+``TopicNormalizer`` at ingest time so that all stored metadata uses the
+same canonical snake_case vocabulary defined in ``topic_taxonomy.py``.
+This guarantees that ChromaDB ``$eq`` filters in ``retriever.py`` always
+match, regardless of how the source JSON files were originally labelled.
 """
 
 import json
@@ -11,6 +20,9 @@ from tqdm import tqdm
 
 from src.data.vector_store import VectorStore
 from src.utils.config import get_settings
+from src.utils.topic_taxonomy import TopicNormalizer
+
+_topic_normalizer = TopicNormalizer()
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +93,12 @@ class DataIngestion:
             ids.append(item.get("id"))
             
             meta = item.copy()
+
+            # Normalize topic to canonical form before storing in ChromaDB.
+            # This ensures $eq filters in retriever.py always match correctly.
+            if "topic" in meta and meta["topic"]:
+                meta["topic"] = _topic_normalizer.normalize(meta["topic"])
+
             for key, value in meta.items():
                 if isinstance(value, (list, dict)):
                     meta[key] = json.dumps(value)

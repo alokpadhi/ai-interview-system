@@ -81,7 +81,7 @@ class CacheEntry:
     grade: RelevanceGrade
     created_at: float = field(default_factory=time.time)
     last_accessed_at: float = field(default_factory=time.time)
-    hit_count = 0
+    hit_count: int = 0
     used_ids: Set[str] = field(default_factory=set)
 
     # TTL Reusability
@@ -108,12 +108,12 @@ class CacheEntry:
         self.hit_count += 1
 
 @dataclass
-class CocneptEntry:
+class ConceptEntry:
     """A cached concept lookup"""
     concept_name: str
     data: Dict[str, Any]
     created_at: float = field(default_factory=time.time)
-    last_accessed_at = float = field(default_factory=time.time)
+    last_accessed_at: float = field(default_factory=time.time)
 
     def is_expired(self) -> bool:
         return(time.time() - self.created_at) > 3600 # 60 mins
@@ -176,7 +176,7 @@ class InterviewCacheStore:
     def __init__(self):
         # per sessions tools
         self._topic_cache: Dict[str, OrderedDict[str, CacheEntry]] = {}
-        self._concept_cache: Dict[str, OrderedDict[str, CocneptEntry]] = {}
+        self._concept_cache: Dict[str, OrderedDict[str, ConceptEntry]] = {}
         self._session_created_at: Dict[str, datetime] = {}
 
         # locking
@@ -313,6 +313,7 @@ class InterviewCacheStore:
 
             if entry is None:
                 self.metrics.record_miss("concept", session_id, "not found")
+                return None
 
             if entry.is_expired():
                 self.metrics.record_miss("concept", session_id,
@@ -333,8 +334,8 @@ class InterviewCacheStore:
     ) -> None:
         """Cache a concept lookup result."""
         async with self._session_locks[session_id]:
-            pool = self._ensure_concept_tool(session_id)
-            pool[concept_name] = CocneptEntry(
+            pool = self._ensure_concept_pool(session_id)
+            pool[concept_name] = ConceptEntry(
                 concept_name=concept_name, data=data
             )
 
@@ -384,7 +385,7 @@ class InterviewCacheStore:
 
         cleaned = 0
         for sid in to_remove:
-            cleaned += await self.clear_sessioon(sid)
+            cleaned += await self.clear_session(sid)
             self.metrics.record_invalidation(
                 CacheInvalidationReason.SESSION_ABANDONED
             )
