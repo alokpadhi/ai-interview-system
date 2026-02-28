@@ -36,7 +36,7 @@ from typing_extensions import TypedDict
 from src.rag.cache import (
     InterviewCacheStore,
     RelevanceGrade,
-    get_cache_store,
+    get_cache_store
 )
 from src.rag.grader import DocumentGrader
 from src.rag.models import RetrievalContext, RetrievalResult
@@ -47,19 +47,8 @@ from src.utils.logging_config import get_logger
 logger = get_logger(__name__)
 
 
-# ═══════════════════════════════════════════════════════════════
-# Constants
-# ═══════════════════════════════════════════════════════════════
-
 MAX_CORRECTION_ATTEMPTS = 2
 MEDIUM_FILTER_THRESHOLD = 0.55
-
-
-
-
-# ═══════════════════════════════════════════════════════════════
-# Fallback questions — last resort if CRAG exhausts
-# ═══════════════════════════════════════════════════════════════
 
 FALLBACK_QUESTIONS: List[RetrievalResult] = [
     RetrievalResult(
@@ -101,17 +90,10 @@ FALLBACK_QUESTIONS: List[RetrievalResult] = [
     ),
 ]
 
-
-# ═══════════════════════════════════════════════════════════════
-# RAGResult — what agents receive from AgenticRAGService
-# ═══════════════════════════════════════════════════════════════
-
+# RAGResult: what agents recieve from AgenticRAGService
 @dataclass
 class RAGResult:
-    """Result from AgenticRAGService.retrieve_with_crag().
-
-    Superset of v2's CRAGResult — adds observability fields.
-    """
+    """Result from AgenticRAGService invoked with retrieve_with_crag()."""
     candidates: List[RetrievalResult]
     grade: RelevanceGrade
     attempts: int = 1
@@ -122,35 +104,27 @@ class RAGResult:
     latency_ms: float = 0.0
     is_fallback: bool = False
 
-
-# ═══════════════════════════════════════════════════════════════
-# CRAG LangGraph Subgraph — State + Nodes + Graph builder
-# ═══════════════════════════════════════════════════════════════
-
+# CRAG Langgraph subgraph - State + Nodes + graph builder
 class CRAGState(TypedDict):
-    """Internal state for the CRAG correction subgraph."""
+    """Interval state for the CRAG correction subgraph."""
     query: str
     documents: List[RetrievalResult]
     grade: Optional[str]
     grading_feedback: str
     correction_count: int
     seen_queries: List[str]
-    # Retrieval context fields (TypedDicts must be JSON-serializable)
     difficulty: str
     topic_intent: str
     n_results: int
     exclude_ids: List[str]
     final_documents: List[RetrievalResult]
 
-
 async def retrieve_node(
-    state: CRAGState,
-    retriever: VectorRetriever,
+        state: CRAGState,
+        retriever: VectorRetriever,
 ) -> Dict[str, Any]:
-    """Query ChromaDB for candidate questions.
-
-    ChromaDB is sync — wrapped in asyncio.to_thread() to avoid
-    blocking the event loop.
+    """Query chromadb for candidate questions.
+    Chromadb is sync - wrapped in asyncio.to_thread() for non blocking event loop.
     """
     docs: List[RetrievalResult] = await asyncio.to_thread(
         retriever.retrieve_questions,
@@ -158,68 +132,66 @@ async def retrieve_node(
         difficulty=state["difficulty"] or None,
         topic=state["topic_intent"] or None,
         exclude_ids=set(state["exclude_ids"]),
-        n_results=state["n_results"],
+        n_result=state["n_results"],
     )
+
     return {
         "documents": docs,
-        "seen_queries": state["seen_queries"] + [state["query"]],
+        "seen_queries": state["seen_queries"] + [state["query"]]
     }
 
-
 async def grade_node(
-    state: CRAGState,
-    grader: DocumentGrader,
+        state: CRAGState,
+        grader: DocumentGrader,
 ) -> Dict[str, Any]:
-    """Grade retrieved documents.
-
-    topic_intent passed explicitly; fast paths skip LLM;
-    borderline invokes structured-output chain.
+    """Grade the retrieved documents.
+    fast paths skil LLM; only borderline cases use LLM.
     """
     context = RetrievalContext(difficulty_level=state["difficulty"])
+
     result = await grader.grade(
         documents=state["documents"],
         context=context,
-        topic_intent=state["topic_intent"],
+        topic_intent=state["topic_intent"]
     )
+
     return {
         "grade": result.grade.value,
-        "grading_feedback": result.feedback,
+        "grading_feedback": result.feedback
     }
 
-
 async def refine_query_node(
-    state: CRAGState,
-    refiner: QueryRefiner,
+        state: CRAGState,
+        refiner: QueryRefiner,
 ) -> Dict[str, Any]:
-    """Refine query for next retrieval attempt.
-
-    Strategy rotation: LLM refine → topic pivot → simplify.
+    """Refine query for the next retrieval attempt.
+    Strategy rotation: LLM -> pivot_topic -> simplify.
     """
     new_query, strategy = await refiner.refine(
         original_query=state["query"],
         feedback=state["grading_feedback"],
         difficulty=state["difficulty"],
         seen_queries=state["seen_queries"],
-        attempt=state["correction_count"],
+        attempt=state["correction_count"]
     )
+
     logger.info(
         "Query refined | strategy=%s | query=%s",
         strategy.value, new_query,
     )
+
     return {
         "query": new_query,
-        "correction_count": state["correction_count"] + 1,
+        "correction_count": state["correction_count"] + 1
     }
-
 
 def package_results_node(state: CRAGState) -> Dict[str, Any]:
     """Finalize documents based on grade.
-
-    HIGH   — all documents
-    MEDIUM — filter by relevance_score >= threshold, fallback to all
-    LOW    — best available sorted by score (correction exhausted)
+    HIGH: All documents.
+    MEDIUM: filter by relevance_score>=threshold, fallback to all
+    LOW: best available after sorting the score.
     """
-    grade = RelevanceGrade(state["grade"]) if state["grade"] else RelevanceGrade.LOW
+    grade = RelevanceGrade(state["grade"] if state["grade"] else RelevanceGrade.LOW)
     docs = state["documents"]
 
     if grade == RelevanceGrade.HIGH:
@@ -230,8 +202,9 @@ def package_results_node(state: CRAGState) -> Dict[str, Any]:
     else:
         final = sorted(docs, key=lambda d: d.relevance_score, reverse=True)
 
-    return {"final_documents": final}
-
+    return {
+        "final_documents": final
+    }
 
 def route_after_grade(state: CRAGState) -> str:
     """Conditional edge: route to correction or packaging."""
@@ -240,7 +213,7 @@ def route_after_grade(state: CRAGState) -> str:
 
     if grade in (RelevanceGrade.HIGH.value, RelevanceGrade.MEDIUM.value):
         return "package_results"
-
+    
     if attempts >= MAX_CORRECTION_ATTEMPTS:
         logger.info(
             "CRAG correction exhausted | attempts=%s grade=%s — "
@@ -248,23 +221,22 @@ def route_after_grade(state: CRAGState) -> str:
             attempts, grade,
         )
         return "package_results"
-
+    
     return "refine_query"
 
-
 def build_crag_graph(
-    retriever: VectorRetriever,
-    grader: DocumentGrader,
-    refiner: QueryRefiner,
+        retriever: VectorRetriever,
+        grader: DocumentGrader,
+        refiner: QueryRefiner,
 ) -> Any:
-    """Build and compile the CRAG StateGraph.
-
+    """
+    Build and compile the CRAG stategraph.
     Compiled once at AgenticRAGService init.
-    Each ainvoke() gets an independent execution context — concurrent-safe.
+    Each ainvoke() gets an independent execution context - concurrent safe.
     """
     workflow = StateGraph(CRAGState)
 
-    # functools.partial injects dependencies (DI without classes)
+    # functools.partial injects dependencies
     workflow.add_node("retrieve", partial(retrieve_node, retriever=retriever))
     workflow.add_node("grade", partial(grade_node, grader=grader))
     workflow.add_node("refine_query", partial(refine_query_node, refiner=refiner))
@@ -278,20 +250,17 @@ def build_crag_graph(
         {
             "refine_query": "refine_query",
             "package_results": "package_results",
-        },
+        }
     )
-    workflow.add_edge("refine_query", "retrieve")   # correction loop
+    workflow.add_edge("refine_query", "retrieve") # correction loop
     workflow.add_edge("package_results", END)
 
     return workflow.compile()
 
 
-# ═══════════════════════════════════════════════════════════════
-# AgenticRAGService — Stateless facade
-# ═══════════════════════════════════════════════════════════════
-
 class AgenticRAGService:
-    """Stateless RAG facade. All session state lives in InterviewCacheStore.
+    """
+    Stateless RAG facade. All session state lives in InterviewCacheStore.
 
     Flow:
       1. Check topic cache → serve if hit
@@ -306,13 +275,12 @@ class AgenticRAGService:
             exclude_ids=[], n_results=5,
         )
     """
-
     def __init__(
-        self,
-        retriever: VectorRetriever,
-        grader: DocumentGrader,
-        refiner: QueryRefiner,
-        cache_store: Optional[InterviewCacheStore] = None,
+            self,
+            retriever: VectorRetriever,
+            grader: DocumentGrader,
+            refiner: QueryRefiner,
+            cache_store: Optional[InterviewCacheStore] = None,
     ) -> None:
         self.retriever = retriever
         self.grader = grader
@@ -320,16 +288,16 @@ class AgenticRAGService:
         self.cache_store = cache_store or get_cache_store()
         self.crag_graph = build_crag_graph(retriever, grader, refiner)
 
-        logger.info("AgenticRAGService initialized")
+        logger.info("AgenticRAGService intialized.")
 
     async def retrieve_with_crag(
-        self,
-        topic: str,
-        difficulty: str,
-        exclude_ids: List[str],
-        remaining_time: Optional[float] = None,
-        n_results: int = 5,
-        session_id: Optional[str] = None,
+            self,
+            topic: str,
+            difficulty: str,
+            exclude_ids: List[str],
+            remaining_time: Optional[float] = None,
+            n_results: int = 5,
+            session_id: Optional[str] = None
     ) -> RAGResult:
         """Primary retrieval API — called by QuestionSelectorAgent.
 
@@ -346,24 +314,24 @@ class AgenticRAGService:
         """
         start = time.time()
 
-        # 1. Try topic cache
+        # try topic cache
         if session_id:
             cached = await self.cache_store.get_topic_questions(
                 session_id=session_id,
                 topic=topic,
                 difficulty=difficulty,
                 exclude_ids=set(exclude_ids),
-                n_results=n_results,
+                n_results=n_results
             )
             if cached:
                 return RAGResult(
                     candidates=cached,
-                    grade=RelevanceGrade.HIGH,  # Cache only stores HIGH/MEDIUM
+                    grade=RelevanceGrade.HIGH,
                     served_from_cache=True,
                     latency_ms=(time.time() - start) * 1000,
                 )
-
-        # 2. CRAG subgraph
+            
+        # CRAG subgraph
         try:
             crag_state: CRAGState = {
                 "query": topic,
@@ -389,29 +357,25 @@ class AgenticRAGService:
             corrective = correction_count > 0
 
             if final_docs:
-                # 3. Cache results for reuse
                 if session_id:
                     await self.cache_store.set_topic_questions(
                         session_id=session_id,
                         topic=topic,
                         difficulty=difficulty,
                         questions=final_docs,
-                        crag_grade=grade,
+                        crag_grade=grade
                     )
-
                 return RAGResult(
                     candidates=final_docs,
                     grade=grade,
-                    attempts=correction_count + 1,
+                    attempts=correction_count+1,
                     refined_query=queries_used[-1] if corrective else None,
                     corrective_applied=corrective,
-                    queries_used=queries_used,
-                    latency_ms=(time.time() - start) * 1000,
+                    latency_ms=(time.time() - start) * 1000
                 )
-
         except Exception as e:
-            logger.error("CRAG subgraph failed: %s", str(e), exc_info=True)
-
+            logger.error("CRAG subgraph failed: %s", str(e), exc_info=True)\
+            
         # 4. Fallback
         logger.warning(
             "All retrieval paths exhausted — serving fallback | "
@@ -424,27 +388,26 @@ class AgenticRAGService:
             is_fallback=True,
             latency_ms=(time.time() - start) * 1000,
         )
-
+    
     async def retrieve_batch(
-        self,
-        topic: str,
-        difficulty: str,
-        n_results: int = 5,
+            self,
+            topic: str,
+            difficulty: str,
+            n_results: int = 5,
     ) -> RAGResult:
-        """Retrieve a batch with no exclusions — used for cache pre-warming.
-
-        Thin wrapper over retrieve_with_crag() with empty exclude_ids.
+        """
+        Retrive a batch with no exclusions - usef for cache pre-warming.
         """
         return await self.retrieve_with_crag(
             topic=topic,
             difficulty=difficulty,
             exclude_ids=[],
-            n_results=n_results,
+            n_results=n_results
         )
-
+    
     async def end_interview(self, session_id: str) -> int:
         """Cleanup: remove all cached data for a finished session."""
-        removed = await self.cache_store.clear_session(session_id)
+        removed = await self.cache_store.clear_session(session_id=session_id)
         logger.info(
             "Interview ended — cache cleared | session=%s entries=%d",
             session_id, removed,

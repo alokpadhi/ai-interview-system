@@ -68,7 +68,7 @@ src/tools/rubric_tool.py         # @tool rubric_lookup
 src/tools/code_validator.py      # @tool code_validator (AST parse)
 ```
 
-**Deliverables:** `execute(state, config) → dict`, CoT chain with `.with_retry()` + `.with_fallbacks()`, reflection chain (7B), `rubric_lookup` and `code_validator` tools, topic injection, `is_fallback` flag, tests.
+**Deliverables:** `execute(state, config) → dict`, CoT chain with `.with_retry()` + `.with_fallbacks()`, reflection chain (7B), optional self-consistency sampling (2x for prod), `rubric_lookup` and `code_validator` tools, topic injection, `is_fallback` flag, tests.
 
 ---
 
@@ -82,7 +82,7 @@ src/agents/question_selector.py  # QS Agent (3 modes: retrieve/follow_up/clarify
 src/tools/concept_lookup.py      # @tool concept_lookup
 ```
 
-**Feedback:** 4 templates per score band + rotation, anti-sycophancy, no score leakage, concept cache integration.
+**Feedback:** 4 templates per score band + rotation, anti-sycophancy, no score leakage, concept cache integration, semantic repetition reflection (7B cross-check).
 
 **QS:** 3 modes, `_determine_question_mode()`, `MAX_FOLLOW_UPS=2`, `target_concepts` for dynamic rubric, atomic `select_and_mark()`.
 
