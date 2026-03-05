@@ -84,7 +84,7 @@ class FeedbackOutput(BaseModel):
 
     # FeedbackComposer components
     # Using empty string not None, for structure.format()
-    strength_ackowledgment: str = Field(default="", description="Acknowledgment of" \
+    strength_acknowledgment: str = Field(default="", description="Acknowledgment of" \
                                     "what candidate did well - empty score when" \
                                     " score < 5")
     gap_hint: str = Field(default="", description="Implicit hint about gaps without" \

@@ -117,32 +117,33 @@ class EvaluatorValidationGate:
         Extract key points from either static rubric or dynamic target_concepts.
 
         Priority:
-         - Static Rubric (retrieved questions)
-         - target_concepts (follow up questions)
-         - target_misconception(clarify questions)
-         - [] - skip drift check, log debug
+         1. Static rubric — flattens key_points from ALL criteria, not just
+            technical_accuracy. Consistent with rubric_tool._format_rubric().
+         2. target_concepts (follow-up questions)
+         3. target_misconception (clarify questions)
+         4. [] — drift check skipped, logged at debug level
         """
-        # 1.static rubric
+        # 1. Static rubric — flatten all criteria
         rubric = question.get("rubric", {})
-        static_points = (
-            rubric.get("criteria", {})
-            .get("technical_accuracy", {})
-            .get("key_points", [])
-        )
+        criteria = rubric.get("criteria", {})
+        static_points: list[str] = []
+        for criterion in criteria.values():
+            if isinstance(criterion, dict):
+                static_points.extend(criterion.get("key_points", []))
 
         if static_points:
             return static_points
-        
-        # 2.dynamic rubcric
+
+        # 2. Dynamic rubric (follow-up questions)
         target_concepts = question.get("target_concepts", [])
         if target_concepts:
             return target_concepts
-        
-        # 3.clarification target
+
+        # 3. Clarification target
         misconception = question.get("target_misconception")
         if misconception:
             return [str(misconception)]
-        
+
         # 4. Nothing available — drift check skipped
         logger.debug(
             "No key points available for question_id=%s (type=%s) — "
@@ -161,6 +162,8 @@ class EvaluatorValidationGate:
             if val is None:
                 continue
             score = val.get("score") if isinstance(val, dict) else val
+            if score is None:
+                return Check(passed=False, message=f"{f} score is missing. {val!r}")
             try:
                 score = float(score)
             except (TypeError, ValueError):
@@ -192,6 +195,8 @@ class EvaluatorValidationGate:
             if val is None:
                 continue
             score = val.get("score") if isinstance(val, dict) else val
+            if score is None:
+                continue
             try:
                 scores.append(float(score))
             except (TypeError, ValueError):

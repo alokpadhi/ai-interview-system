@@ -1670,29 +1670,40 @@ class EvaluatorValidationGate:
     def _extract_key_points(self, question: dict) -> list[str]:
         """
         Extract key points from EITHER static rubric or dynamic target_concepts.
+
+        Priority:
+          1. Static rubric — flattens key_points from ALL criteria (technical_accuracy,
+             completeness, depth, clarity). Consistent with rubric_tool._format_rubric().
+             Gives drift detection the full expected knowledge set, not just accuracy points.
+          2. target_concepts  — dynamic rubric for follow-up/clarify questions (set by QS)
+          3. target_misconception — single expected correction for clarify questions
+          4. []  — drift check silently skipped, logged at debug level
         
-        For retrieved questions: question["rubric"]["key_points"]
-        For follow-up/clarify: question["target_concepts"] (set by QS)
+        Design note: initialize_state() takes primitives (difficulty, time_budget_minutes,
+        focus_topics) rather than the StartRequest object — keeping graph/state layer
+        independent of the FastAPI layer.
         """
-        # Static rubric (retrieved questions)
+        # 1. Static rubric — flatten ALL criteria, not just technical_accuracy
         rubric = question.get("rubric", {})
-        static_points = rubric.get("criteria", {}).get(
-            "technical_accuracy", {}
-        ).get("key_points", [])
-        
+        criteria = rubric.get("criteria", {})
+        static_points: list[str] = []
+        for criterion in criteria.values():
+            if isinstance(criterion, dict):
+                static_points.extend(criterion.get("key_points", []))
+
         if static_points:
             return static_points
-        
-        # Dynamic rubric (follow-up/clarification questions)
+
+        # 2. Dynamic rubric (follow-up/clarification questions)
         target_concepts = question.get("target_concepts", [])
         if target_concepts:
             return target_concepts
-        
-        # Clarification: single misconception is the "key point"
+
+        # 3. Clarification target
         misconception = question.get("target_misconception")
         if misconception:
-            return [f"Corrects misconception: {misconception}"]
-        
+            return [str(misconception)]
+
         return []
     
     def _key_point_coverage_alignment(
@@ -2902,7 +2913,11 @@ class FinalReport(BaseModel):
 async def start_interview(
     request: StartRequest, background_tasks: BackgroundTasks
 ) -> StartResponse:
-    state = initialize_state(request)
+    state = initialize_state(
+        difficulty=request.difficulty,
+        time_budget_minutes=request.time_budget_minutes,
+        focus_topics=request.focus_topics,
+    )
     
     config = RunnableConfig(
         configurable={"thread_id": state["interview_id"]},

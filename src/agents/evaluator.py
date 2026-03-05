@@ -239,4 +239,193 @@ class EvaluatorAgent:
         — no duplication.
         """
         return _contains_code(response)
+    
+    def _apply_reflection(self, eval_dict: dict, reflection: dict) -> dict:
+        """
+        Apply reflection adjustments to the evaluation dict in-place.
+
+        Reflection output shape (from REFLECTION_PROMPT → JsonOutputParser):
+            {
+                "adjustment_needed": bool,
+                "reason": str,
+                "score_adjustment": float,   # -2 to +2
+                "missed_misconceptions": list[str],
+                "additional_key_points_missed": list[str]
+            }
+
+        Conservative by design — only acts when adjustment_needed is True.
+        Score is clamped to [0.0, 10.0] and rounded to 1 decimal.
+        """
+        if not isinstance(reflection, dict):
+            logger.warning("Reflection output is not a dict - skipping adjustment")
+            return eval_dict
+        
+        if not reflection.get("adjustment_needed", False):
+            logger.debug(
+                "Reflection: no adjustment needed. Reason: %s",
+                reflection.get("reason", ""),
+            )
+            return eval_dict
+        
+        score_adjustment = reflection.get("score_adjustment", 0)
+        if score_adjustment:
+            current = float(eval_dict.get("overall_score", 5.0))
+            adjusted = round(max(0.0, min(10.0, current + score_adjustment)), 1)
+            logger.debug(
+                "Relfection adjusted score: %.1f -> %.1f (reason: %s)",
+                current,
+                adjusted,
+                reflection.get("reason", "")
+            )
+            eval_dict["overall_score"] = adjusted
+
+        missed_misconceptions = reflection.get("missed_misconceptions", [])
+        if missed_misconceptions:
+            existing = eval_dict.get("misconceptions", [])
+            eval_dict["misconceptions"] = existing + missed_misconceptions
+
+        additional_missed = reflection.get("additional_key_points_missed", [])
+        if additional_missed:
+            existing = eval_dict.get("key_points_missed", [])
+            eval_dict["key_points_missed"] = existing + additional_missed
+
+        return eval_dict
+    
+    async def _single_evaluate(
+            self,
+            state: InterviewState,
+            config: RunnableConfig
+    ) -> dict:
+        """
+        Single CoT evaluation pass:
+            eval_chain → model_dump() → topic injection
+            → (optional) code_validator → reflection → _apply_reflection
+
+        model_dump() is called here so that:
+        - _apply_reflection always receives a plain dict
+        - execute() always writes a plain dict to state (no Pydantic leak)
+
+        Returns: {"current_evaluation": eval_dict}
+        """
+        question = state["current_question"]
+        response = state.get("candidate_response") or ""
+
+        rubric_context = await self._build_rubric_context(question)
+
+        raw = await self.eval_chain.ainvoke(
+            {
+                "question": question["text"],
+                "response": response,
+                "rubric_context": rubric_context
+            },
+            config=config
+        )
+
+        # normalize to plain dict
+        if isinstance(raw, EvaluationOutput):
+            eval_dict = raw.model_dump()
+        else:
+            eval_dict = dict(raw)
+
+        # topic, question_id injection
+        eval_dict["topic"] = question.get("topic", "general")
+        eval_dict["question_id"] = question.get("id", "")
+
+        # code validation: if response have code block
+        if self._response_contains_code(response):
+            code_result = await code_validator.ainvoke({"response": response})
+            if code_result.get("code_detected") and not code_result.get("is_valid",True):
+                errors = code_result.get("errors", [])
+                existing = eval_dict.get("misconceptions", [])
+                eval_dict["misconceptions"] = existing + [
+                    f"Code syntax error: {e}" for e in errors
+                ]
+        reflection = await self.reflect_chain.ainvoke(
+            {
+                "question": question["text"],
+                "response": response,
+                "rubric": rubric_context,
+                "evaluation": eval_dict
+            },
+            config=config
+        )
+
+        eval_dict = self._apply_reflection(eval_dict, reflection)
+
+        return {
+            "current_evaluation": eval_dict
+        }
+    
+    # only public method to call by graph node.
+    async def execute(
+            self, 
+            state: InterviewState,
+            config: RunnableConfig
+    ) -> dict:
+        """
+        main method. called by the langgraph graph node.
+        Asyncio.wait_for() timeout is applied at the graph level.
+        """
+        self.circuit_breaker.reset() # reset before triggering evaluator for fresh budget
+        gate = self.validation_gates.get("evaluator")
+        question = state["current_question"]
+
+        try:
+            if self.consistency_samples <= 1:
+                result = await self._single_evaluate(state, config)
+                eval_dict = result["current_evaluation"]
+            else:
+                results = await asyncio.gather(
+                    *[
+                        self._single_evaluate(state, config)
+                        for _ in range(self.consistency_samples)
+                    ],
+                    return_exceptions=True
+                )
+                valid = [r for r in results if isinstance(r, dict)]
+
+                if not valid:
+                    logger.error("All self-consistency evaluation failed")
+                    eval_dict = gate.get_fallback()
+                    eval_dict["topic"] = question.get("topic", "unknown")
+                    return {"current_evaluation": eval_dict}
+                
+                scores = [r["current_evaluation"]["overall_score"] for r in valid]
+                sorted_pairs = sorted(zip(scores, valid), key=lambda x: x[0])
+                median_idx = len(sorted_pairs) // 2
+                eval_dict = sorted_pairs[median_idx][1]["current_evaluation"]
+
+                divergence = max(scores) - min(scores)
+                if divergence > 2.0:
+                    eval_dict["needs_human_review"] = True
+                    eval_dict["consistency_divergence"] = divergence
+                    logger.warning(
+                        "High self-consistency divergence: %.1f - flagged for review",
+                        divergence
+                    )
+
+        except Exception as exc:
+            logger.error(
+                "Evaluation pipeline failed: %s", exc, exc_info=True
+            )
+            eval_dict = gate.get_fallback()
+            eval_dict["topic"] = question.get("topic", "unknown")
+            return {"current_evaluation": eval_dict}
+        
+        validation_result = gate.validate(eval_dict, question)
+
+        if not validation_result.is_valid:
+            logger.warning(
+                "Evaluator gate failed: %s", validation_result.feedback
+            )
+            if self.circuit_breaker.should_retry("evaluator"):
+                logger.info("Retrying evaluator - circuit breaker budget available.")
+                return await self.execute(state, config)
+            
+            logger.error("Circuit breaker open - using fallback evaluation")
+            eval_dict = gate.get_fallback()
+            eval_dict["topic"] = question.get("topic", "unknown")
+
+        return {"current_evaluation": eval_dict}
+
 
