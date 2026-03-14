@@ -132,7 +132,10 @@ FEEDBACK_PROMPT = ChatPromptTemplate.from_messages([
         "If empty, ignore it.\n"
         "Concept context: {concept_context}\n"
         "Generate feedback between 15-200 words. "
-        "Never generate fewer than 15 words regardless of score band."
+        "Never generate fewer than 15 words regardless of score band.\n"
+        "Feedback must address the QUESTION that was asked, not just what the candidate said. "
+        "If the candidate answered off-topic, hint them toward the actual question's concepts. "
+        "Never introduce concepts from the candidate's response if they are irrelevant to the question."
     )),
     ("human", (
         "Score band: {score_band}\n"

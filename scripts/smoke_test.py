@@ -43,14 +43,11 @@ logger = get_logger(__name__)
 # ── Hardcoded test input ─────────────────────────────────────────────────────
 # Deliberately partial answer (~6/10) to trigger follow-up path
 CANDIDATE_RESPONSE = """
-Imbalanced datasets occur when one class significantly outnumbers another. 
-This causes models to be biased toward the majority class. Evaluation metrics 
-like F1-score and precision-recall are more appropriate than accuracy 
-for imbalanced datasets.
+RAG is a way to provide extra context through retrieval and inject it into LLM.
 """
 
 # Force a known topic so CANDIDATE_RESPONSE stays relevant regardless of plan
-FORCED_TOPIC = "classification"
+FORCED_TOPIC = "retrieval augmented generation"
 
 SEPARATOR = "─" * 60
 
