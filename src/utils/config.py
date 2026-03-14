@@ -41,6 +41,9 @@ class Settings(BaseSettings):
     vector_db_path: Path = Path("data/vector_db")
     sqlite_db_path: Path = Path("data/sqlite/interviews.db")
 
+    # Rubrics path
+    rubric_path: Path = Path("data/rubrics/all_rubrics.json")
+
     # Observability
     langchain_tracing_v2: bool = False
     langsmith_api_key: str = ""
