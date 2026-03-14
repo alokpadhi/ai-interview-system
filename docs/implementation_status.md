@@ -349,6 +349,75 @@ Module-level: `PlanOutput` Pydantic model, `INTERVIEW_PLAN_PROMPT`, `_build_plan
 
 ---
 
+## Smoke Test — Post-Session 10 Validation
+
+### File Produced
+
+| File | Purpose |
+|------|---------|
+| `scripts/smoke_test.py` | Manual end-to-end validation script. Real LLMs, real ChromaDB, real state flow. Not a unit test — run manually after wiring changes |
+
+### Bugs Found and Fixed During Smoke Test
+
+| Bug | Location | Fix |
+|-----|----------|-----|
+| ChromaDB multi-field `where` clause | `src/rag/retriever.py` `_build_where_clause()` | Build `filters` list, use `{"$and": [...]}` for 2+ filters, single dict for 1, `None` for 0 |
+| `RetrievalResult` item assignment | `src/agents/question_selector.py` `_retrieve_question()` | Replace `.model_dump()` with `.to_question_dict()` — `@property` fields not serialized by Pydantic |
+| `to_question_dict()` missing | `src/rag/models.py` `RetrievalResult` | Added explicit serialization method mapping all `@property` fields (`difficulty`, `topic`, `question_type`) alongside declared fields |
+| `+2` invalid JSON from reflection LLM | `src/agents/evaluator.py` `_apply_reflection()` | Added to reflection prompt: score_adjustment must be plain integer, no leading `+`. Removed redundant `re.sub` sanitization — structured output already parses |
+| `_apply_reflection` received dict, applied regex | `src/agents/evaluator.py` | `reflect_chain` uses `.with_structured_output()` — returns dict, not raw string. Removed `re.sub` call, kept `isinstance(reflection, dict)` guard |
+| `question_mode` always `retrieve` on first turn | `src/agents/question_selector.py` `_determine_question_mode()` | Replaced `state["question_count"] == 0` guard with `not state.get("current_evaluation")` — QS runs before Supervisor increments `question_count` |
+| `start_graph` state not seeded into checkpointer | `scripts/smoke_test.py` | First `interview_graph.ainvoke()` must pass `{**start_result, "candidate_response": ...}` — subsequent turns pass only `{"candidate_response": ...}` |
+| `topic` mismatch — LLM generates free-form topic names | `src/agents/supervisor.py` | Added `available_topics: list[str]` to `SupervisorAgent.__init__` and plan prompt. Prompt explicitly constrains `topic_sequence` to known ChromaDB topics |
+| `AgentRegistry` missing `available_topics` | `src/graph/agent_registry.py` | Added `available_topics: list[str]` parameter. Passed through to `SupervisorAgent` |
+
+### Architectural Decisions from Smoke Test
+
+| Decision | Rationale |
+|----------|-----------|
+| `available_topics` computed outside `AgentRegistry` | Configuration injection pattern — registry receives result of infrastructure query, not the infrastructure itself. Testable with hardcoded list |
+| `get_available_topics()` on `VectorRetriever` | Distinct topic values fetched once at startup via `collection.get(include=["metadatas"])`. Called in lifespan before `AgentRegistry` instantiation |
+| `to_question_dict()` explicit serialization | `model_dump()` silently drops `@property` fields. Named method signals intent — "converts RAG result to interview pipeline question" — and makes boundary conversion explicit |
+| `_determine_question_mode` guards on `current_evaluation` not `question_count` | `question_count` is incremented by Supervisor AFTER fan-out. QS runs during fan-out — `question_count` is always 0 on first turn when QS runs |
+| Timeout configurable via `default_timeout` param | Production value 15s is calibrated for warm models. Smoke test and dev need higher values (60-120s) for cold start + VRAM swap. Default stays 15s |
+
+### Known Issues (Not Blocking Session 11)
+
+| Issue | Impact | Resolution |
+|-------|--------|------------|
+| `time_allocation` format wrong — LLM generates summary dict instead of per-topic | Plan display only — not consumed by agents currently | Fix supervisor prompt with concrete example in Session 11 |
+| Feedback gate fails on first attempt (~18 word responses) | Adds one retry, ~1-1.5s latency | Lower minimum to 15 words OR strengthen feedback prompt |
+| Difficulty for next topic retrieval uses current turn's difficulty | QS retrieves at current difficulty; Supervisor updates difficulty after fan-in | Accepted architectural tradeoff — documented. Difficulty update takes effect on turn after topic transition |
+| q5_K_M models cannot fit simultaneously in 12GB VRAM | VRAM swap adds 3-8s latency per model switch | Switch to q4_K_M when download complete — both models fit in ~10.5GB |
+
+### Smoke Test Flow (for Session 11 reference)
+
+```
+initialize infrastructure (LLMs, ChromaDB, RAG)
+    ↓
+initialize_concept_lookup(retriever)          ← module-level singleton
+    ↓
+available_topics = retriever.get_available_topics()
+    ↓
+AgentRegistry(... available_topics=available_topics)
+    ↓
+AsyncSqliteSaver (async context manager)
+    ↓
+build_start_graph() + build_interview_graph()
+    ↓
+start_graph.ainvoke(initial_state, config)    ← plan + first question
+    ↓
+interview_graph.ainvoke(                      ← first turn: seed checkpoint
+    {**start_result, "candidate_response": ...}, config
+)
+    ↓
+interview_graph.ainvoke(                      ← subsequent turns
+    {"candidate_response": ...}, config       ← checkpointer loads rest
+)
+```
+
+---
+
 ## What's Next — Session 11: FastAPI Layer
 
 ```
@@ -359,13 +428,16 @@ src/api/streaming.py   # SSE streaming for /submit_response/stream
 ```
 
 **Critical reminders for Session 11:**
-- Lifespan owns: checkpointer init, `initialize_concept_lookup()` call, `AgentRegistry` instantiation, graph compilation
+- Lifespan owns: checkpointer init, `initialize_concept_lookup()` call, `get_available_topics()` call, `AgentRegistry` instantiation, graph compilation — in that order
+- First `/submit_response` must pass `{**start_result, "candidate_response": response}` — not just `{"candidate_response": response}`
+- API layer needs to track whether it's the first turn for a session — use session store or checkpointer state check
 - `initialize_state()` takes primitives — not `StartRequest` directly
 - `RunnableConfig(configurable={"thread_id": session_id})` propagated on every `graph.ainvoke()`
 - Background pre-warming via `BackgroundTasks` — not raw `asyncio.create_task`
-- `interview_graph` receives only `{"candidate_response": response}` on `/submit_response` — checkpointer loads rest
 - Scores hidden from user — `/submit_response` returns feedback + next question, never evaluation internals
 - `/end` triggers `cache_store.clear_session()` and returns final report
+- Fix `time_allocation` supervisor prompt in this session
+- Model pre-warming: ping both LLMs with dummy request inside lifespan before accepting traffic
 
 ---
 

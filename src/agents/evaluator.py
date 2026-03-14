@@ -1,4 +1,5 @@
 import asyncio
+
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.output_parsers import JsonOutputParser
@@ -111,6 +112,9 @@ Check for these issues:
 3. High score despite missing key concepts.
 4. Missed misconceptions in the candidate answer.
 5. Overly harsh or overly generous grading.
+
+score_adjustment must be a plain integer with NO leading + sign.
+Use 2 not +2, use -2 not -2.
 
 If the evaluation is correct, return {{"adjustment_needed": false, "reason": "brief reason"}}.
 

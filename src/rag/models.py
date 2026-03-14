@@ -49,6 +49,20 @@ class RetrievalResult(BaseModel):
     def __repr__(self) -> str:
         """Developer-friendly representation"""
         return f"RetrievalResult(id={self.id!r}, score={self.relevance_score:.3f})"
+
+    def to_question_dict(self) -> dict:
+        """Convert to a flat dict suitable for use as a question in the interview pipeline.
+        model_dump() excludes @property fields — this method includes them explicitly."""
+        return {
+            "id": self.id,
+            "text": self.text,
+            "relevance_score": self.relevance_score,
+            "difficulty": self.difficulty,      # @property → explicit
+            "topic": self.topic,                # @property → explicit
+            "question_type": self.question_type, # @property → explicit
+            # add any other properties you have
+            **self.metadata                     # keep raw metadata as fallback
+        }
     
 
 class RetrievalContext(BaseModel):

@@ -48,6 +48,8 @@ class Settings(BaseSettings):
     langchain_tracing_v2: bool = False
     langsmith_api_key: str = ""
     langsmith_project: str = "ai-interview-system"
+
+    consistency_samples: int = 1
     
     # Logging
     log_level: str = "INFO"

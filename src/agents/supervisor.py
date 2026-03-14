@@ -58,22 +58,22 @@ class PlanOutput(BaseModel):
 
 
 INTERVIEW_PLAN_PROMPT = ChatPromptTemplate.from_messages([
-    ("system",
-        "You are an expert technical interviewer designing an AI/ML interview plan.\n\n"
-        "Rules:\n"
-        "- difficulty_curve must have exactly one entry per topic in topic_sequence\n"
-        "- Valid difficulty values: easy, medium, hard\n"
-        "- time_allocation must account for the full time budget across all topics\n"
-        "- Start with foundational topics before advanced ones\n"
-        "- focus_areas should reflect candidate's stated interests if provided\n"
-        "- difficulty_curve should progressively challenge the candidate"
-    ),
-     ("human", (
-         "Difficulty: {difficulty}\n"
-         "Focus topics: {focus_topics}\n"
-         "Time Budget: {time_budget} minutes\n"
-         "Target questions: {target_questions}"
-     ))
+    ("system", (
+        "You are an AI interview planner. Create a structured plan.\n"
+        "Return valid JSON with: topic_sequence, difficulty_curve, "
+        "time_allocation, focus_areas.\n"
+        "difficulty_curve has ONE entry per topic (not per question).\n\n"
+        "IMPORTANT: topic_sequence MUST only contain topics from this list:\n"
+        "{available_topics}\n"
+        "Do not invent new topic names."
+    )),
+    ("human", (
+        "Difficulty: {difficulty}\n"
+        "Focus topics: {focus_topics}\n"
+        "Time budget: {time_budget} minutes\n"
+        "Target questions: {target_questions}\n"
+        "Available topics: {available_topics}"
+    ))
 ])
 
 def _build_plan_chain(complex_llm):
@@ -101,12 +101,14 @@ class SupervisorAgent:
     """
     def __init__(self,
                  complex_llm: BaseChatModel,
-                 trend_analyzer: TrendAnalyzer):
+                 trend_analyzer: TrendAnalyzer,
+                 available_topics: list[str]):
         self.complex_llm = complex_llm
         self.trend_analyzer = trend_analyzer
         self.validation_gates = ValidationGateRegistry()
         self.circuit_breaker = CircuitBreaker(max_retries=1)
         self.plan_chain = _build_plan_chain(complex_llm)
+        self.available_topics = available_topics
 
     async def create_interview_plan(self, 
                               state: InterviewState, 
@@ -121,7 +123,8 @@ class SupervisorAgent:
             "difficulty": state["difficulty_level"],
             "focus_topics": state.get("focus_topics", []),
             "time_budget": state["time_budget_minutes"],
-            "target_questions": target_questions
+            "target_questions": target_questions,
+            "available_topics": self.available_topics,
         }, config=config)
 
         difficulty_level = plan.difficulty_curve[0]

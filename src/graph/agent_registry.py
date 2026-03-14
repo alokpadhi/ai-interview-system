@@ -16,13 +16,17 @@ logger = get_logger(__name__)
 class AgentRegistry:
     def __init__(self, complex_llm: BaseChatModel, 
                  fast_llm: BaseChatModel, 
-                 rag_service: AgenticRAGService, 
+                 rag_service: AgenticRAGService,
+                 available_topics: list[str],
                  cache_store: InterviewCacheStore, consistency_samples=1):
         trend_analyzer = TrendAnalyzer()
 
         self.evaluator = EvaluatorAgent(complex_llm, fast_llm, consistency_samples)
         self.conversation_manager = ConversationManager(complex_llm)
-        self.supervisor = SupervisorAgent(complex_llm, trend_analyzer)
+        self.supervisor = SupervisorAgent(
+            complex_llm, 
+            trend_analyzer,
+            available_topics=available_topics)
         self.feedback = FeedbackAgent(fast_llm, cache_store)
         self.question_selector = QuestionSelectorAgent(
                                     rag_service, fast_llm,
@@ -31,4 +35,4 @@ class AgentRegistry:
                                     self.supervisor.circuit_breaker)
         
         logger.info("AgentRegistry initialized with all agents")
-        
+

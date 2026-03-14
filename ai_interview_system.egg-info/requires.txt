@@ -6,6 +6,7 @@ langchain-community>=0.4.1
 langchain-ollama>=1.0.1
 langchain-openai>=1.1.7
 langgraph>=1.0.6
+langgraph-checkpoint-sqlite>=3.0.3
 mlflow>=3.8.1
 pydantic>=2.12.5
 pymupdf>=1.26.7

@@ -214,7 +214,9 @@ class QuestionSelectorAgent:
     def _determine_question_mode(
             self, state: InterviewState, remaining_time: float
     ) -> str:
-        if state["question_count"] == 0:
+        # if state["question_count"] == 0:
+        #     return "retrieve"
+        if not state.get("current_evaluation"):
             return "retrieve"
         if remaining_time < 5:
             return "retrieve"
@@ -268,7 +270,7 @@ class QuestionSelectorAgent:
                 session_id=session_id,
                 topic=topic,
                 difficulty=difficulty,
-                questions=crag_result.candidates,
+                questions=[c.to_question_dict() for c in crag_result.candidates],
                 crag_grade=crag_result.grade
             )
 
@@ -280,7 +282,7 @@ class QuestionSelectorAgent:
             )
 
             if selected is None and crag_result.candidates:
-                selected = crag_result.candidates[0]
+                selected = crag_result.candidates[0].to_question_dict()
             elif selected is None:
                 selected = self._get_fallback_question()
 
