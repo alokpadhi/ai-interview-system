@@ -1,4 +1,4 @@
-# AI Interview System — Implementation Status (Sessions 1–8)
+# AI Interview System — Implementation Status (Sessions 1–9)
 
 > **Purpose**: Handoff context for continuing development. Pair with `architecture(v2).md`.
 
@@ -7,15 +7,15 @@
 ## Current State
 
 ```
-✅ IMPLEMENTED (Sessions 1–8)         │  ⬜ NOT YET BUILT (Sessions 9+)
+✅ IMPLEMENTED (Sessions 1–9)         │  ⬜ NOT YET BUILT (Sessions 10+)
 ──────────────────────────────────────│──────────────────────────────────
-Config, Logging, LLM Factory          │  SupervisorAgent (OODA)
-Embeddings (BGE-base-en-v1.5, 768d)   │  ConversationManager (graph node)
-ChromaDB Vector Store (3 collections) │  Main InterviewGraph (LangGraph)
-Data ingestion (700Q, 125C, 50S)      │  API layer (FastAPI endpoints)
-VectorRetriever (domain-level API)    │  Streaming (SSE)
-SQLite DB (5 tables, WAL mode)        │  Resilience patterns (.with_retry,
-MemoryService (4-type memory)         │    .with_fallbacks, timeouts)
+Config, Logging, LLM Factory          │  Main InterviewGraph (LangGraph)
+Embeddings (BGE-base-en-v1.5, 768d)   │  API layer (FastAPI endpoints)
+ChromaDB Vector Store (3 collections) │  Streaming (SSE)
+Data ingestion (700Q, 125C, 50S)      │  Resilience patterns (.with_retry,
+VectorRetriever (domain-level API)    │    .with_fallbacks, timeouts)
+SQLite DB (5 tables, WAL mode)        │
+MemoryService (4-type memory)         │
 CRAG subgraph (LangGraph StateGraph)  │
 DocumentGrader (hybrid: score + LLM)  │
 QueryRefiner (3 strategies)           │
@@ -34,8 +34,10 @@ concept_lookup.py (@tool, ChromaDB)   │
 FeedbackAgent (5-layer pipeline)      │
 FeedbackComposer (variation engine)   │
 QuestionSelectorAgent (3 modes)       │
+ConversationManager (graph node)      │
+SupervisorAgent (OODA + plan)         │
 78 + Session 6 + Session 7 +          │
-  Session 8 tests                     │
+  Session 8 + Session 9 tests         │
 ```
 
 ---
@@ -77,7 +79,6 @@ QuestionSelectorAgent (3 modes)       │
 
 **`initialize_state(difficulty, time_budget_minutes, focus_topics) → InterviewState`**
 Takes primitives not `StartRequest` — dependency boundary between core pipeline and FastAPI.
-Called from API layer as `initialize_state(request.difficulty, ...)`.
 
 **`InterviewState` reducer rules:**
 - `operator.add` → agents return ONLY new items (e.g. `{"all_evaluations": [new_eval]}`)
@@ -93,14 +94,14 @@ Called from API layer as `initialize_state(request.difficulty, ...)`.
 - `needs_human_review: bool = False` — set when self-consistency divergence > 2.0
 - `consistency_divergence: Optional[float] = None`
 
-**`FeedbackOutput` key fields (inter-agent contract in `contracts.py`):**
+**`FeedbackOutput` key fields:**
 - `feedback_text: str` — only field exposed to candidate
 - `strength_acknowledgment / gap_hint / transition_phrase: str = ""` — empty string not None; FeedbackComposer uses `.format()`, None breaks it
 - `structure_template: str` — tracked for variation across turns
 
 **`QuestionOutput` key fields:**
 - `question_type: str` — NOT `Literal`; gate owns constraint validation
-- `target_concepts: list[str] = []` — dynamic rubric for follow_up/clarify; set at runtime by QS, not a ChromaDB field
+- `target_concepts: list[str] = []` — dynamic rubric for follow_up/clarify; set at runtime by QS
 - `estimated_time_minutes: float = 5.0` — `# TODO: Session 12 — add_time_metadata.py`
 - `parent_question_id / target_misconception: Optional[str] = None`
 
@@ -112,7 +113,7 @@ Called from API layer as `initialize_state(request.difficulty, ...)`.
 
 **`CircuitBreaker(max_retries=1)` methods:**
 - `should_retry(agent_name) → bool`
-- `reset(agent_name=None)` — `# TODO: call at top of SupervisorAgent.validate_and_decide (Session 9)`
+- `reset(agent_name=None)` — called at top of `SupervisorAgent.validate_and_decide`
 
 ---
 
@@ -193,52 +194,25 @@ Called from API layer as `initialize_state(request.difficulty, ...)`.
 - Module-level `_retriever: Optional[VectorRetriever] = None`
 - `initialize_concept_lookup(retriever)` — called once at app startup in lifespan context
 - Returns `{found, explanation, simple_explanation, examples, related_concepts}`
-- `found: False` is graceful miss — agent checks before using result
-- Pure semantic search via `retrieve_concepts(query=concept_name, n_results=1)` — no category filter
 - Tool is stateless — agent owns cache read/write, not the tool
 
 **`FeedbackComposer`**
-- `STRUCTURES` dict — 4 templates per band (high/medium/low). Score bands: `>= 8.0` → high, `>= 5.0` → medium, `< 5.0` → low
-- `TRANSITIONS` list — 8 entries; `""` removed from list, every-3rd-turn logic handles empty transition exclusively
+- `STRUCTURES` dict — 4 templates per band (high/medium/low)
+- Score bands: `>= 8.0` → high, `>= 5.0` → medium, `< 5.0` → low
 - `compose(components, score, turn_number, previous_structures) → tuple[str, str]` — returns `(feedback_text, used_template)`
 
-**`FeedbackAgent(fast_llm, cache_store)`**
-
-5-layer pipeline in `execute()`:
-1. `_get_concept_context()` — cost-guarded conditional RAG (skips if score >= 7.0 or no missed concepts)
+**`FeedbackAgent(fast_llm, cache_store)`** — 5-layer pipeline:
+1. `_get_concept_context()` — cost-guarded conditional RAG (skips if score >= 7.0)
 2. `feedback_chain.ainvoke()` — structured generation of `FeedbackComponents`
 3. `composer.compose()` — deterministic assembly → `(feedback_text, used_template)`
 4. `_check_semantic_repetition()` — fires only if `len(recent_feedbacks) >= 2`
 5. `validation_gate.validate()` → circuit breaker → recursive retry → fallback
 
 **`QuestionSelectorAgent(rag_service, fast_llm, complex_llm, cache_store, circuit_breaker)`**
-
-3-mode execution in `execute()`:
-- `RETRIEVE`: atomic `select_and_mark()` → CRAG on miss → `select_and_mark()` again → fallback
-- `FOLLOW_UP`: 14B generation → `target_concepts = eval_data["key_points_missed"][:2]`
-- `CLARIFY`: 14B generation → `target_concepts = [misconception]` + `target_misconception = misconception`
-
-Key methods:
-- `_determine_question_mode(state, remaining_time) → str` — pure rule-based, no LLM
-- `_retrieve_question(state, remaining_time, config) → tuple[dict, str]` — always injects `topic` explicitly
-- `_react_select(candidates, state, config) → dict` — 7B `.with_structured_output(QuestionSelection)`, resolves `selected_id` back to full dict
-- `_get_next_topic_from_plan(state) → str` — indexes by `len(topics_covered)`, NOT `question_count`
-- `_select_weakest_topic(state) → str` — reads `evaluation["topic"]`, skips `"unknown"` fallback evals
-- `_get_performance_trend(state) → str` — reads `ema_trajectory` from state directly (no TrendAnalyzer — Supervisor runs after QS in the DAG)
-- `_get_fallback_question() → dict` — UUID-based ID, always valid
-
-**State returns:**
-```python
-# retrieve mode
-{"current_question": q, "question_mode": "retrieve",
- "follow_up_count": 0, "conversation_thread": [q["id"]],
- "topics_covered": [topic]}
-
-# follow_up / clarify mode
-{"current_question": q, "question_mode": mode,
- "follow_up_count": count + 1, "conversation_thread": [q["id"]],
- "topics_covered": []}   # operator.add — empty = no new topic
-```
+- `_get_performance_trend()` reads `ema_trajectory` from state directly — TrendAnalyzer cannot be injected into QS (Supervisor runs after QS in DAG)
+- `_get_next_topic_from_plan()` indexes by `len(topics_covered)`, NOT `question_count`
+- `_react_select()` closure for `selector_fn` — captures `state`/`config` without polluting cache interface
+- `topic` explicitly injected on all question dicts at construction point
 
 ---
 
@@ -246,35 +220,101 @@ Key methods:
 
 | Decision | Rationale |
 |----------|-----------|
-| `initialize_concept_lookup()` module-level singleton | Standard pattern for tools needing infrastructure deps — injected once at startup, not passed as tool parameter (would expose to LLM schema) |
-| Tool is stateless, agent owns cache | Tools should be pure retrieval — side effects (cache writes) belong in agent layer |
-| `FeedbackComponents` local to `feedback.py` | Internal LLM output schema, not an inter-agent contract. Only `FeedbackOutput` (in `contracts.py`) crosses agent boundary |
-| `compose()` returns `tuple[str, str]` | `execute()` needs `used_template` for `previous_feedback_structures`. Clean interface — caller unpacks, no separate method needed |
-| `_check_semantic_repetition` returns `tuple[str, FeedbackComponents, str]` | All three values are causally linked — returning subset would leave stale references in caller |
-| Fallback uses `"fallback"` sentinel for `previous_feedback_structures` | Fallback text doesn't correspond to any real template — recording stale template would corrupt future rotation exclusion window |
-| Fallback bypasses validation | Fallbacks are last-resort guaranteed-safe minimums. Validating fallback creates unrecoverable loop |
-| `CircuitBreaker` injected into QS, not instantiated | Supervisor owns and resets it; QS only holds a reference — Inversion of Control |
-| `_get_performance_trend()` reads `ema_trajectory` from state | TrendAnalyzer cannot be injected into QS — Supervisor (who owns it) runs after QS in the fan-out/fan-in DAG. State is the communication channel between turns |
-| `_react_select()` closure for `selector_fn` | Cache defines minimal `list[dict] -> dict` contract; closure captures `state`/`config` without polluting cache interface |
-| `topic` explicitly injected on all question dicts | "It comes from somewhere upstream" is not a guarantee — explicit injection at construction point is |
-| Module-level chain factories (`_build_followup_chain` etc.) | Independently unit-testable without instantiating agent; mirrors Session 7 pattern |
+| `initialize_concept_lookup()` module-level singleton | Tools needing infrastructure deps — injected once at startup, not passed as tool parameter |
+| Tool is stateless, agent owns cache | Tools should be pure retrieval — side effects belong in agent layer |
+| `FeedbackComponents` local to `feedback.py` | Internal LLM output schema, not an inter-agent contract |
+| `compose()` returns `tuple[str, str]` | `execute()` needs `used_template` for `previous_feedback_structures` |
+| `CircuitBreaker` injected into QS, not instantiated | Supervisor owns and resets it — Inversion of Control |
 
 ---
 
-### Bugs Caught (Session 8 — QS)
+## Session 9 — ConversationManager + SupervisorAgent
 
-| Bug | Fix |
-|-----|-----|
-| Tuple comma in `REACT_SELECTION_PROMPT` human message | Removed comma — adjacent string literals auto-concatenate |
-| `.with_retry()` on LLM only, not full chain | Moved to wrap entire chain |
-| `_get_remaining_time` vs `_get_remaining_minutes` name mismatch | Unified to `_get_remaining_minutes` |
-| Missing `datetime` and `InterviewState` imports | Added |
-| `response.content.strip()` on `StrOutputParser` output | Changed to `response.strip()` — StrOutputParser returns `str` not `BaseMessage` |
-| `_get_performance_trend` both conditions identical and wrong sign | Fixed to `> 0.8` (improving) and `< -0.8` (declining) |
-| `_retrieve_question` missing `remaining_time` parameter | Added to signature |
-| Missing `crag_grade=crag_result.grade` in `set_topic_questions` | Added — grade-based TTL was silently defaulting to MEDIUM |
-| `uuid` not imported, `id` shadows Python builtin | Added import, renamed to `fallback_id` |
-| REACT prompt never instructed model to return `selected_id` | Added explicit instruction to return the `id` field |
+### Files Produced
+
+| File | Purpose |
+|------|---------|
+| `src/services/conversation.py` | `ConversationManager` — LangGraph graph node, rolling window + batch summarization |
+| `src/agents/supervisor.py` | `SupervisorAgent` — OODA loop + plan creation, owns `question_count`, EMA authority |
+
+---
+
+### Key Interfaces (Session 9)
+
+**`ConversationManager(complex_llm: BaseChatModel)`**
+
+- `maybe_update_summary(state, config) → dict` — LangGraph node. Returns `{}` (no-op) most turns. Triggers when `unsummarized >= SUMMARIZE_EVERY_N_TURNS`
+- `get_context_for_agent(state) → str` — Facade: assembles summary + recent verbatim turns for agent consumption. `def` not `async` — no I/O
+- `_create_summary(existing_summary, new_turns, config) → str` — calls `summarize_chain.ainvoke()`
+- `_format_for_summary(messages) → str` — lossy, truncates via `_truncate_at_sentence(q=200, a=300)`
+- `_format_full(messages) → str` — lossless, joins with `"\n\n"`
+- `_truncate_at_sentence(text, max_chars) → str` — `@staticmethod`, sentence-boundary truncation, 50% budget guard
+
+Turn counting: `sum(1 for m in messages if isinstance(m, HumanMessage))` — both in `maybe_update_summary` AND `get_context_for_agent`. Robust against system/tool messages.
+
+Constants (class-level): `MAX_RECENT_TURNS = 3`, `SUMMARIZE_EVERY_N_TURNS = 3`
+
+**`SupervisorAgent(complex_llm: BaseChatModel, trend_analyzer: TrendAnalyzer)`**
+
+- `create_interview_plan(state, config) → dict` — 1 LLM call (14B). Returns `interview_plan`, `difficulty_level` (seeded from `curve[0]`), `original_difficulty`, `difficulty_reduced_due_to_performance=False`, `stage="questioning"`
+- `validate_and_decide(state, config) → dict` — 0 LLM calls. Full OODA loop. Sole owner of `question_count` increment
+- `_observe(state, ema) → Observation` — pure snapshot, no side effects
+- `_orient(obs, trajectory) → Analysis` — calls TrendAnalyzer, derives conclusions
+- `_decide_continuation(analysis, state) → tuple[bool, Optional[str]]` — two termination conditions: `time_up`, `completed`
+- `_resolve_difficulty(analysis, state) → tuple[str, bool]` — four guard clauses in order: time_pressure → follow_up/clarify → no_adjust → EMA reconciliation
+- `_get_plan_difficulty_for_next_topic(state) → str` — indexes by `len(topics_covered)`, NOT `question_count`
+- `_harder_of(a, b) → str` / `_easier_of(a, b) → str` — one-liners via `DIFFICULTY_ORDER`
+- `_calculate_target_questions(time_budget) → int` — `max(5, min(12, time_budget // 4))`
+- `_get_elapsed_minutes(state) → float` — safe, returns `0` if no `interview_start_time`
+
+Module-level: `PlanOutput` Pydantic model, `INTERVIEW_PLAN_PROMPT`, `_build_plan_chain(complex_llm)`, `Observation` dataclass, `Analysis` dataclass, `DIFFICULTY_ORDER`, `DIFFICULTY_FROM_ORDER`, `NEUTRAL_EMA = 5.0`
+
+---
+
+### Critical Design Decisions (Session 9)
+
+| Decision | Rationale |
+|----------|-----------|
+| `get_context_for_agent` is `def` not `async` | No I/O — marking async speculatively misleads callers and adds coroutine overhead |
+| ConversationManager returns `{}` for no-op | Explicit partial update pattern — don't return current values, reducers preserve them |
+| Two slices for summarization | `messages[:-(MAX_RECENT_TURNS*2)]` excludes recent; `[-SUMMARIZE_EVERY_N_TURNS*2:]` takes only new batch — avoids re-summarizing already-summarized turns |
+| `PlanOutput` Pydantic model with `with_structured_output()` | Consistent with rest of system — every LLM output parsed via Pydantic, never raw JSON |
+| `_build_plan_chain()` as module-level factory | Independently unit-testable without instantiating agent — consistent with Session 7 pattern |
+| `CircuitBreaker` instantiated in Supervisor, injected into QS | Supervisor owns lifecycle and calls `reset()`. QS is consumer only — Inversion of Control |
+| `difficulty_curve` indexed by `len(topics_covered)` | Curve has one entry per topic. Follow-ups don't advance the index — `question_count` would be wrong |
+| `ema_trajectory` uses `last_value` | Full recalc each turn — `operator.add` would accumulate stale history |
+| `performance_trajectory` returns `[]` for fallback | `operator.add + []` = no change. Fallback scores never corrupt EMA trajectory |
+| `question_count` incremented post-OODA | State is immutable during node execution. `_decide_continuation` uses `state["question_count"] + 1` to look ahead at post-increment value |
+| `difficulty_reduced_due_to_performance` uses OR | Once reduced, stays reduced for final report — never resets even if candidate recovers |
+| Logging at decision points in `validate_and_decide` | Per-turn EMA, difficulty, and continuation decisions are the most critical observability points in the system |
+| `new_ema[-1] if new_ema else NEUTRAL_EMA` in logging | Guards against all-fallback sessions where `full_trajectory = []` and EMA returns `[]` |
+
+---
+
+## What's Next — Session 10: Main InterviewGraph + Build Graph
+
+```
+src/graph/interview_graph.py    # build_interview_graph() + build_start_graph()
+src/graph/agent_registry.py     # AgentRegistry — wires all agents together
+```
+
+**Deliverables:**
+- `build_interview_graph(agents, checkpointer)` — compiled LangGraph StateGraph
+  - Nodes: evaluator → (feedback ∥ question_selector) → supervisor_check → maybe_summarize
+  - Fan-out/fan-in edges
+  - `_wrap_with_timeout()` on each node (`asyncio.wait_for(timeout=15.0)`)
+  - `AsyncPostgresSaver` (prod) / `AsyncSqliteSaver` (dev) checkpointer
+- `build_start_graph(agents)` — plan creation + first question
+- `AgentRegistry` — single object holding all agent instances, wired with correct dependencies
+- Graph compilation with `interrupt_before=["supervisor_check"]` commented out but ready
+
+**Critical reminders for Session 10:**
+- Fan-out: both `feedback` and `question_selector` depend on `evaluator` — parallel edges
+- Fan-in: both feed into `supervisor_check` — LangGraph handles merge via reducers
+- `_wrap_with_timeout()` is a decorator function, not a method — module-level
+- `AsyncPostgresSaver` requires async context manager via lifespan
+- `RunnableConfig` with `thread_id = session_id` propagated on every `ainvoke`
+- `CircuitBreaker` created in `SupervisorAgent.__init__`, passed to `QuestionSelectorAgent` via `AgentRegistry`
 
 ---
 
@@ -300,36 +340,3 @@ Key methods:
 | Gap | Impact | Resolution |
 |-----|--------|------------|
 | `estimated_time_minutes` not in ingested questions | Time-aware filtering inactive; defaults to `5.0` | Session 12: `scripts/add_time_metadata.py` |
-
----
-
-## What's Next — Session 9: SupervisorAgent + ConversationManager
-
-```
-src/agents/supervisor.py        # SupervisorAgent (OODA loop + plan creation)
-src/services/conversation.py    # ConversationManager (LangGraph graph node)
-```
-
-**SupervisorAgent deliverables:**
-- `create_interview_plan(state, config) → dict` — 14B, plan-and-execute at `/start`
-- `validate_and_decide(state, config) → dict` — rule-based OODA, 0 LLM calls per turn
-- `_observe()`, `_orient()`, `_decide_continuation()`, `_resolve_difficulty()`
-- `_get_plan_difficulty_for_next_topic()` — indexes by `len(topics_covered)`, NOT `question_count`
-- `CircuitBreaker.reset()` called at top of `validate_and_decide` — deferred from Sessions 7/8
-- Owns `question_count` increment — sole owner, incremented post fan-in
-- Fallback score exclusion from EMA — filters `is_fallback=True` before calling TrendAnalyzer
-
-**ConversationManager deliverables:**
-- `maybe_update_summary(state, config) → dict` — LangGraph node, conditional no-op most turns
-- `get_context_for_agent(state) → str` — assembles summary + recent turns for agent prompts
-- Sentence-boundary truncation via `_truncate_at_sentence()`
-- Trigger: every 3 new turns; keeps last 3 turns full, summarizes older
-- Turn counting via `isinstance(m, HumanMessage)` — robust against system messages
-
-**Critical reminders for Session 9:**
-- Supervisor decoupled from RAG — plan creation only, QS handles first question retrieval
-- `ema_trajectory` uses `last_value` — full recalc, not append
-- `performance_trajectory` uses `operator.add` — return only NEW score per turn
-- `difficulty_curve` indexed by topic index, follow-ups don't advance the curve
-- No early termination — difficulty reduction instead
-- ConversationManager runs as graph node AFTER `supervisor_check`, not post-hoc
