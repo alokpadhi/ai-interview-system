@@ -44,10 +44,7 @@ logger = get_logger(__name__)
 # Deliberately partial answer (~6/10) to trigger follow-up path
 CANDIDATE_RESPONSE = """
 Imbalanced datasets occur when one class significantly outnumbers another. 
-This causes models to be biased toward the majority class. Common techniques 
-to handle this include oversampling the minority class using SMOTE, 
-undersampling the majority class, and using class weights to penalize 
-misclassification of the minority class more heavily. Evaluation metrics 
+This causes models to be biased toward the majority class. Evaluation metrics 
 like F1-score and precision-recall are more appropriate than accuracy 
 for imbalanced datasets.
 """

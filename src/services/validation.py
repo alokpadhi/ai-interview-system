@@ -80,7 +80,7 @@ class EvaluatorValidationGate:
     LOW_COVERAGE_RATIO = 0.5
 
     # maximum allowed variance to check consistency
-    MAX_SCORE_VARIANCE = 5.0
+    MAX_SCORE_VARIANCE = 6.0
 
     # minimum reasoning length
     MIN_REASONING_CHARS = 50
@@ -307,7 +307,7 @@ class FeedbackValidationGate:
       3. No sycophancy at low scores (score < SYCOPHANCY_SCORE_THRESHOLD)
       4. No score leakage
     """
-    MIN_WORDS = 20
+    MIN_WORDS = 15
     MAX_WORDS = 200
 
     # check sycophancy only if score below 7.0

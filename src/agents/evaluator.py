@@ -89,6 +89,9 @@ CRITICAL CONSTRAINTS:
 - Never penalize for communication style if the technical content is sound.
 - If candidate_response is empty or off-topic, assign 0 across all criteria.
 - Your evaluation_reasoning must be minimum 2 sentences and explain your overall_score specifically.
+- Sub-scores (technical_accuracy, completeness, depth, clarity) must be internally consistent. 
+No single sub-score should differ from the others by more than 3 points.
+A response cannot score 8 on clarity but 2 on depth — these dimensions are correlated. Calibrate all sub-scores before finalizing.
 """),
     ("human", """Evaluate the candidate's response now. Follow the protocol exactly.
 Question: {question}

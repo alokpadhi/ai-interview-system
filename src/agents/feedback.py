@@ -130,7 +130,9 @@ FEEDBACK_PROMPT = ChatPromptTemplate.from_messages([
         "Tone guidance: {tone_guidance}\n\n"
         "If concept context is provided below, subtly weave it into your gap_hint. "
         "If empty, ignore it.\n"
-        "Concept context: {concept_context}"
+        "Concept context: {concept_context}\n"
+        "Generate feedback between 15-200 words. "
+        "Never generate fewer than 15 words regardless of score band."
     )),
     ("human", (
         "Score band: {score_band}\n"

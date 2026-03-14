@@ -242,6 +242,10 @@ class QuestionSelectorAgent:
             remaining_time: float,
             config: RunnableConfig
     ) -> tuple[dict, str]:
+        # Note: difficulty_level reflects current turn's value — Supervisor
+        # updates difficulty after fan-in, so first retrieval for a new topic
+        # uses previous turn's difficulty. Accepted tradeoff — takes effect
+        # on the following turn.
         topic = self._get_next_topic_from_plan(state)
         difficulty = state["difficulty_level"]
         session_id = state["interview_id"]

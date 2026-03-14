@@ -65,7 +65,11 @@ INTERVIEW_PLAN_PROMPT = ChatPromptTemplate.from_messages([
         "difficulty_curve has ONE entry per topic (not per question).\n\n"
         "IMPORTANT: topic_sequence MUST only contain topics from this list:\n"
         "{available_topics}\n"
-        "Do not invent new topic names."
+        "Do not invent new topic names.\n"
+        "time_allocation must map each topic name to minutes as a flat dict. "
+        "Example: {{\"classification\": 5, \"feature_selection\": 6}}. "
+        "Every topic in topic_sequence must have an entry. "
+        "Total must equal time_budget_minutes."
     )),
     ("human", (
         "Difficulty: {difficulty}\n"
