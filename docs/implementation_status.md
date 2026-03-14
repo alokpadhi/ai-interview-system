@@ -1,4 +1,4 @@
-# AI Interview System — Implementation Status (Sessions 1–9)
+# AI Interview System — Implementation Status (Sessions 1–10)
 
 > **Purpose**: Handoff context for continuing development. Pair with `architecture(v2).md`.
 
@@ -7,18 +7,18 @@
 ## Current State
 
 ```
-✅ IMPLEMENTED (Sessions 1–9)         │  ⬜ NOT YET BUILT (Sessions 10+)
+✅ IMPLEMENTED (Sessions 1–10)        │  ⬜ NOT YET BUILT (Sessions 11+)
 ──────────────────────────────────────│──────────────────────────────────
-Config, Logging, LLM Factory          │  Main InterviewGraph (LangGraph)
-Embeddings (BGE-base-en-v1.5, 768d)   │  API layer (FastAPI endpoints)
-ChromaDB Vector Store (3 collections) │  Streaming (SSE)
-Data ingestion (700Q, 125C, 50S)      │  Resilience patterns (.with_retry,
-VectorRetriever (domain-level API)    │    .with_fallbacks, timeouts)
-SQLite DB (5 tables, WAL mode)        │
-MemoryService (4-type memory)         │
-CRAG subgraph (LangGraph StateGraph)  │
-DocumentGrader (hybrid: score + LLM)  │
-QueryRefiner (3 strategies)           │
+Config, Logging, LLM Factory          │  API layer (FastAPI endpoints)
+Embeddings (BGE-base-en-v1.5, 768d)   │  Streaming (SSE)
+ChromaDB Vector Store (3 collections) │  Resilience patterns (.with_retry,
+Data ingestion (700Q, 125C, 50S)      │    .with_fallbacks, timeouts)
+VectorRetriever (domain-level API)    │  Observability (LangSmith, Prometheus)
+SQLite DB (5 tables, WAL mode)        │  Evaluation Framework (e2e + LLM judge)
+MemoryService (4-type memory)         │  Docker + Deployment
+CRAG subgraph (LangGraph StateGraph)  │  Data gap: estimated_time_minutes
+DocumentGrader (hybrid: score + LLM)  │    (scripts/add_time_metadata.py)
+QueryRefiner (3 strategies)           │  Final Report (generate_final_report)
 AgenticRAGService (facade)            │
 InterviewCacheStore (dual-pool,       │
   per-session locks, atomic select)   │
@@ -36,6 +36,8 @@ FeedbackComposer (variation engine)   │
 QuestionSelectorAgent (3 modes)       │
 ConversationManager (graph node)      │
 SupervisorAgent (OODA + plan)         │
+AgentRegistry (DI container)          │
+InterviewGraph (LangGraph wiring)     │
 78 + Session 6 + Session 7 +          │
   Session 8 + Session 9 tests         │
 ```
@@ -291,30 +293,79 @@ Module-level: `PlanOutput` Pydantic model, `INTERVIEW_PLAN_PROMPT`, `_build_plan
 
 ---
 
-## What's Next — Session 10: Main InterviewGraph + Build Graph
+## Session 10 — Graph Wiring
+
+### Files Produced
+
+| File | Purpose |
+|------|---------|
+| `src/graph/agent_registry.py` | `AgentRegistry` — DI container, wires all agents with correct dependency order |
+| `src/graph/interview_graph.py` | `build_start_graph()` + `build_interview_graph()` — compiled LangGraph StateGraphs |
+
+---
+
+### Key Interfaces (Session 10)
+
+**`AgentRegistry(complex_llm, fast_llm, rag_service, cache_store, consistency_samples=1)`**
+- Plain class, all agents as public attributes — direct access (`registry.evaluator`, `registry.supervisor` etc.)
+- `TrendAnalyzer` instantiated internally — no external deps, caller has no reason to control it
+- Instantiation order enforced: `SupervisorAgent` first (creates `CircuitBreaker`) → `QuestionSelectorAgent` (consumes `supervisor.circuit_breaker`)
+- No side effects in `__init__` — `initialize_concept_lookup()` called in lifespan, not here
+- Single `logger.info` at end of `__init__` — confirms successful wiring
+
+**`_wrap_with_timeout(agent_fn, timeout_seconds=15.0) → Callable`**
+- Module-level utility — not a method, not a decorator on agents
+- Uses `functools.wraps` — preserves `__name__`, `__qualname__` for LangSmith trace visibility
+- Applied at node registration time, not at agent definition time — graph layer owns execution policy
+
+**`build_start_graph(agents: AgentRegistry) → CompiledStateGraph`**
+- Linear: `START → create_plan → first_question → END`
+- No checkpointer — runs once, output handed to API layer which seeds first `interview_graph` checkpoint
+- Both nodes wrapped with `_wrap_with_timeout`
+
+**`build_interview_graph(agents: AgentRegistry, checkpointer: BaseCheckpointSaver) → CompiledStateGraph`**
+- Entry: `START → evaluator`
+- Fan-out: `evaluator → feedback`, `evaluator → question_selector` (parallel)
+- Fan-in: `feedback → supervisor_check`, `question_selector → supervisor_check`
+- Linear tail: `supervisor_check → maybe_summarize → END`
+- All 5 nodes wrapped with `_wrap_with_timeout`
+- `interrupt_before=["supervisor_check"]` commented out but present — activates human-in-the-loop without refactoring
+- Assign → log → return pattern: `compiled = graph.compile(...)` then `logger.info(...)` then `return compiled`
+
+---
+
+### Critical Design Decisions (Session 10)
+
+| Decision | Rationale |
+|----------|-----------|
+| `AgentRegistry` instantiates once in `__init__`, not via methods | Methods would create new instances on every call — registry must be a singleton container, not a factory |
+| Raw LLM params not stored as public attributes on registry | Registry's job ends at construction — exposing `complex_llm` leaks implementation details, callers should use agents not raw LLMs |
+| `_wrap_with_timeout` at registration, not as decorator on agent | Agent stays clean and independently testable; graph layer owns execution policy — cross-cutting infrastructure concern |
+| `functools.wraps` on timeout wrapper | Preserves function identity for LangSmith/LangFuse trace spans — without it every span shows as `"wrapped"` |
+| No try/except around `graph.compile()` | Compilation is a startup operation — fail fast. Swallowing the exception returns `None` which explodes later with a confusing error |
+| `BaseCheckpointSaver` as type hint for checkpointer param | Dependency inversion — function doesn't care if it's Postgres or SQLite, depends on abstraction |
+| `CompiledStateGraph` return type (not `StateGraph`) | Prevents callers from calling `.add_node()` on compiled graph — different interfaces, different contracts |
+| Assign → log → return for compiled graphs | Log only fires after successful compilation — if `compile()` raises, log never fires, which is correct |
+
+---
+
+## What's Next — Session 11: FastAPI Layer
 
 ```
-src/graph/interview_graph.py    # build_interview_graph() + build_start_graph()
-src/graph/agent_registry.py     # AgentRegistry — wires all agents together
+src/api/main.py        # FastAPI app + lifespan context manager
+src/api/routes.py      # /start, /submit_response, /end endpoints
+src/api/models.py      # Request/Response Pydantic models
+src/api/streaming.py   # SSE streaming for /submit_response/stream
 ```
 
-**Deliverables:**
-- `build_interview_graph(agents, checkpointer)` — compiled LangGraph StateGraph
-  - Nodes: evaluator → (feedback ∥ question_selector) → supervisor_check → maybe_summarize
-  - Fan-out/fan-in edges
-  - `_wrap_with_timeout()` on each node (`asyncio.wait_for(timeout=15.0)`)
-  - `AsyncPostgresSaver` (prod) / `AsyncSqliteSaver` (dev) checkpointer
-- `build_start_graph(agents)` — plan creation + first question
-- `AgentRegistry` — single object holding all agent instances, wired with correct dependencies
-- Graph compilation with `interrupt_before=["supervisor_check"]` commented out but ready
-
-**Critical reminders for Session 10:**
-- Fan-out: both `feedback` and `question_selector` depend on `evaluator` — parallel edges
-- Fan-in: both feed into `supervisor_check` — LangGraph handles merge via reducers
-- `_wrap_with_timeout()` is a decorator function, not a method — module-level
-- `AsyncPostgresSaver` requires async context manager via lifespan
-- `RunnableConfig` with `thread_id = session_id` propagated on every `ainvoke`
-- `CircuitBreaker` created in `SupervisorAgent.__init__`, passed to `QuestionSelectorAgent` via `AgentRegistry`
+**Critical reminders for Session 11:**
+- Lifespan owns: checkpointer init, `initialize_concept_lookup()` call, `AgentRegistry` instantiation, graph compilation
+- `initialize_state()` takes primitives — not `StartRequest` directly
+- `RunnableConfig(configurable={"thread_id": session_id})` propagated on every `graph.ainvoke()`
+- Background pre-warming via `BackgroundTasks` — not raw `asyncio.create_task`
+- `interview_graph` receives only `{"candidate_response": response}` on `/submit_response` — checkpointer loads rest
+- Scores hidden from user — `/submit_response` returns feedback + next question, never evaluation internals
+- `/end` triggers `cache_store.clear_session()` and returns final report
 
 ---
 
