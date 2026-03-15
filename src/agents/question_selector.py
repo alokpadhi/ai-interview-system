@@ -21,96 +21,72 @@ class QuestionSelection(BaseModel):
     reasoning: str = Field(description="One sentence explaining the selection")
 
 FOLLOW_UP_PROMPT = ChatPromptTemplate.from_messages([
-    (
-        "system",
-        """
-        You are an experienced technical interviewer.
-
-        Your task is to generate a targeted follow-up question based on a candidate's response.
-
-        Goals:
-        - Probe the candidate's understanding of concepts they missed.
-        - Encourage deeper reasoning.
-        - Maintain a professional interviewer tone.
-
-        Constraints:
-        - Ask ONLY ONE question.
-        - Do NOT reveal the correct answer.
-        - Do NOT explicitly mention the missed points.
-        - The tone should be probing and evaluative, NOT teaching or explanatory.
-        - The question should naturally guide the candidate toward the missing concepts.
-
-        Return ONLY the question text."""
-    ),
-    (
-        "human",
-        """
-        Original Question: {original_question}\n
-        Candidate Response: {candidate_response}\n
-        Concepts the candidate missed: {missed_points}\n
-        Topic: {topic}
-        """
-    )
+    ("system",
+     "You are an experienced technical interviewer.\n\n"
+     "Your task is to generate a targeted follow-up question based on a candidate's response.\n\n"
+     "Goals:\n"
+     "- Probe the candidate's understanding of concepts they missed.\n"
+     "- Encourage deeper reasoning.\n"
+     "- Maintain a professional interviewer tone.\n\n"
+     "Constraints:\n"
+     "- Ask ONLY ONE question. One sentence. No sub-questions. No 'and also...' constructions.\n"
+     "- Do NOT reveal the correct answer.\n"
+     "- Do NOT explicitly mention the missed points.\n"
+     "- The tone should be probing and evaluative, NOT teaching or explanatory.\n"
+     "- The question should naturally guide the candidate toward the missing concepts.\n"
+     "- If missed_points is empty, generate a depth-probing question about the core "
+     "concept in the original question.\n\n"
+     "Return ONLY the question text."),
+    ("human",
+     "Original Question: {original_question}\n"
+     "Candidate Response: {candidate_response}\n"
+     "Concepts the candidate missed: {missed_points}\n"
+     "Topic: {topic}")
 ])
 
 CLARIFICATION_PROMPT = ChatPromptTemplate.from_messages([
-    (
-        "system",
-        """
-        You are a technical interviewer conducting a conceptual interview.
-
-        Your goal is to ask a clarification question that helps the candidate
-        re-examine their reasoning and recognize a potential misconception.
-
-        Guidelines:
-        - Ask ONE concise clarification question.
-        - Encourage the candidate to rethink their explanation.
-        - Do NOT provide hints, corrections, or teaching.
-        - Maintain an interviewer tone rather than a tutor tone.
-        - The question should guide the candidate toward identifying the issue themselves.
-
-        Return ONLY the clarification question.
-        """
-    ),
-    (
-        "human",
-        """
-        Original Question: {original_question}\n
-        Candidate Response: {candidate_response}\n
-        Detected Misconception: {misconception}\n
-        """
-    )
+    ("system",
+     "You are a technical interviewer conducting a conceptual interview.\n\n"
+     "Your goal is to ask a clarification question that helps the candidate "
+     "re-examine their reasoning and recognize a potential misconception.\n\n"
+     "Guidelines:\n"
+     "- Ask ONE concise clarification question. One sentence.\n"
+     "- Ground your question specifically in the misconception provided. "
+     "The question should make the candidate reconsider that specific claim, "
+     "not the topic generally.\n"
+     "- Encourage the candidate to rethink their explanation.\n"
+     "- Do NOT provide hints, corrections, or teaching.\n"
+     "- Maintain an interviewer tone rather than a tutor tone.\n"
+     "- The question should guide the candidate toward identifying the issue themselves.\n\n"
+     "Return ONLY the clarification question."),
+    ("human",
+     "Original Question: {original_question}\n"
+     "Candidate Response: {candidate_response}\n"
+     "Detected Misconception: {misconception}")
 ])
 
 REACT_SELECTION_PROMPT = ChatPromptTemplate.from_messages([
-    (
-        "system",
-        """
-        You are managing the flow of a technical interview.
-
-        Your task is to select the most appropriate next question from a list
-        of candidate questions.
-
-        Selection criteria:
-        1. The question should match the target difficulty level.
-        2. Avoid repeating recently covered topics.
-        3. Adapt to the candidate's performance trend.
-        4. Prefer questions that best evaluate conceptual understanding.
-
-        Instructions:
-        - Choose the SINGLE best question from the candidates.
-        - Return the `id` field of your selected question and a one sentence reasoning.
-        """
-    ),
-    (
-        "human",
-        """
-        Candidate Questions: {candidates}\n
-        Target Difficulty Level: {difficulty_level}\n
-        Recently Covered Topics: {topics_covered}\n
-        Candidate Performance Trend: {performance_trend}\n
-        """
-    )
+    ("system",
+     "You are managing the flow of a technical interview.\n\n"
+     "Your task is to select the most appropriate next question from a list "
+     "of candidate questions.\n\n"
+     "Each candidate question has: id, text, difficulty, topic. "
+     "Base your selection on text and difficulty primarily.\n\n"
+     "Selection criteria:\n"
+     "1. The question should match the target difficulty level.\n"
+     "2. Avoid repeating recently covered topics.\n"
+     "3. Adapt to the candidate's performance trend.\n"
+     "4. Prefer questions that best evaluate conceptual understanding.\n\n"
+     "Return ONLY a JSON object. No preamble. No explanation outside the JSON.\n"
+     "{{\n"
+     "  \"selected_id\": \"<id of chosen question>\",\n"
+     "  \"reasoning\": \"<one sentence>\"\n"
+     "}}"),
+    ("human",
+     "Candidate Questions: {candidates}\n"
+     "Target Difficulty Level: {difficulty_level}\n"
+     "Recently Covered Topics: {topics_covered}\n"
+     "Candidate Performance Trend: {performance_trend}")
 ])
 
 def _build_followup_chain(llm):
@@ -326,7 +302,10 @@ class QuestionSelectorAgent:
         topic_sequence = plan.get("topic_sequence", [])
         topics_covered = state.get("topics_covered", [])
 
-        remaining = [t for t in topic_sequence if t not in topics_covered]
+        # remaining = [t for t in topic_sequence if t not in topics_covered]
+
+        uncovered = [t for t in topic_sequence if t not in topics_covered]
+        remaining = uncovered if uncovered else topic_sequence
 
         if not remaining:
             return self._select_weakest_topic(state)
@@ -334,7 +313,7 @@ class QuestionSelectorAgent:
         if state.get("difficulty_reduced_due_to_performance"):
             fundamentals = [t for t in remaining if t in self.FUNDAMENTAL_TOPICS]
             others = [t for t in remaining if t not in self.FUNDAMENTAL_TOPICS]
-            remaining = fundamentals + others
+            remaining = fundamentals + others if fundamentals else remaining
 
         return remaining[0]
     

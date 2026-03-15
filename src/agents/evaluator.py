@@ -19,12 +19,11 @@ EVAL_COT_PROMPT = ChatPromptTemplate.from_messages([
     ("system", """You are a strict, impartial technical evaluator for AI/ML engineering interviews.
 Your evaluations must be grounded, consistent, and defensible. You do not reward confidence — only correctness and understanding.
 
-EVALUATION CONTEXT:
-Question: {question}
-Candidate Response: {response}
-
 RUBRIC CONTEXT:
 {rubric_context}
+
+If rubric_context contains target_concepts rather than a full rubric,
+evaluate completeness and accuracy against those concepts directly.
 
 ---
 
@@ -89,27 +88,27 @@ CRITICAL CONSTRAINTS:
 - Never penalize for communication style if the technical content is sound.
 - If candidate_response is empty or off-topic, assign 0 across all criteria.
 - Your evaluation_reasoning must be minimum 2 sentences and explain your overall_score specifically.
-- Sub-scores (technical_accuracy, completeness, depth, clarity) must be internally consistent. 
-No single sub-score should differ from the others by more than 3 points.
-A response cannot score 8 on clarity but 2 on depth — these dimensions are correlated. Calibrate all sub-scores before finalizing.
+- Sub-scores must be internally consistent. No single sub-score should differ from any other
+  by more than 4 points. Dimensions are correlated — high clarity with very low depth is
+  a contradiction. Calibrate all sub-scores before finalizing.
+- If overall_score < 5.0, key_points_missed MUST be non-empty. A low score with no missed
+  points is a contradiction — always identify what was missing or incorrect.
 """),
     ("human", """Evaluate the candidate's response now. Follow the protocol exactly.
+
 Question: {question}
 Response: {response}""")
 ])
 
 REFLECTION_PROMPT = ChatPromptTemplate.from_messages([
-(
-"system",
-"""
-You are reviewing an AI evaluation of a candidate's interview answer.
+    ("system", """You are reviewing an AI evaluation of a candidate's interview answer.
 
 Your job is NOT to re-evaluate the answer from scratch.
-
 Instead, verify that the evaluation is logically consistent and fair.
 
-Check for these issues:
+If the evaluation contains "is_fallback": true, return adjustment_needed: false immediately.
 
+Otherwise, check for these issues:
 1. Score inconsistency across dimensions.
 2. Overall score inconsistent with sub-scores.
 3. High score despite missing key concepts.
@@ -118,18 +117,13 @@ Check for these issues:
 
 score_adjustment must be a plain integer with NO leading + sign.
 Use 2 not +2, use -2 not -2.
+Use -1 or 1 for minor corrections. Reserve -2 or 2 only for clear systematic errors.
 
 If the evaluation is correct, return {{"adjustment_needed": false, "reason": "brief reason"}}.
-
 If issues exist, suggest corrected values.
-
 Be conservative — only adjust when clearly necessary.
-"""
-),
-(
-"human",
-"""
-Question:
+"""),
+    ("human", """Question:
 {question}
 
 Candidate Response:
@@ -142,16 +136,13 @@ Evaluation Produced:
 {evaluation}
 
 Return JSON with:
-
 {{
   "adjustment_needed": true | false,
   "reason": "short explanation",
-  "score_adjustment": -2 to +2,
+  "score_adjustment": integer between -2 and 2,
   "missed_misconceptions": [],
   "additional_key_points_missed": []
-}}
-"""
-)
+}}""")
 ])
 
 def build_eval_chain(complex_llm: BaseChatModel):

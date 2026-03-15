@@ -2,6 +2,7 @@
 High level retrieval interface for RAG operations.
 Abstracts chromadb operations with agent-fiendly API.
 """
+import random
 
 from typing import List, Optional, Dict, Set
 from src.utils.logging_config import get_logger
@@ -63,19 +64,19 @@ class VectorRetriever:
                 topic=topic,
                 question_type=question_type
             )
-            
+            pool_size = min(n_result * 4, 20)
             # 2. Call self.vector_store.query() with collection="interview_questions"
             raw_results = self.vector_store.query(
                 collection_name="interview_questions",
                 query_text=query,
-                n_results=n_result,
+                n_results=pool_size,
                 where=where_clause
             )
             
             # 3. Format results using _format_results()
             # 4. Filter out exclude_ids (already done in _format_results)
             results = self._format_results(raw_results, exclude_ids=exclude_ids)
-            
+            results = random.sample(results, min(n_result, len(results)))
             # 5. Log result count
             logger.info(f"Retrieved {len(results)} questions (after exclusions)")
             

@@ -54,7 +54,7 @@ InterviewGraph (LangGraph wiring)     │
 | `src/data/vector_store.py` | `VectorStore` — ChromaDB `PersistentClient`, 3 collections: `interview_questions`, `ml_concepts`, `code_solutions` |
 | `scripts/ingest_to_chromadb.py` | 3-pillar validation (schema→content→embedding), batch upsert |
 | `src/rag/models.py` | `RetrievalResult`, `RetrievalContext`. No ChromaDB types leak to agents |
-| `src/rag/retriever.py` | `VectorRetriever` — agent-friendly API over VectorStore. `retrieve_concepts(query, category=None, n_results=3)` |
+| `src/rag/retriever.py` | `VectorRetriever` — agent-friendly API over VectorStore. `retrieve_concepts(query, category=None, n_results=3)`. Fetches pool of `min(n*4, 20)` from ChromaDB, then `random.sample()` down to `n` for cross-session question diversity |
 | `src/data/database.py` | SQLite WAL mode, 5 tables (`interviews`, `conversations`, `evaluations`, `session_state`, `agent_traces`), `busy_timeout=5000ms` |
 | `src/services/memory_service.py` | 4-type memory: short-term buffer, episodic (SQLite), semantic (ChromaDB), working (state) |
 | `src/rag/agentic_rag.py` | `AgenticRAGService` facade + `build_crag_graph()` LangGraph subgraph. CRAG flow: `retrieve → grade → (refine → retrieve)* → package_results` |
@@ -212,7 +212,7 @@ Takes primitives not `StartRequest` — dependency boundary between core pipelin
 
 **`QuestionSelectorAgent(rag_service, fast_llm, complex_llm, cache_store, circuit_breaker)`**
 - `_get_performance_trend()` reads `ema_trajectory` from state directly — TrendAnalyzer cannot be injected into QS (Supervisor runs after QS in DAG)
-- `_get_next_topic_from_plan()` indexes by `len(topics_covered)`, NOT `question_count`
+- `_get_next_topic_from_plan()` — soft priority filter: uncovered topics first, cycles back to `topic_sequence[0]` when all covered. Indexes by `len(topics_covered)`, NOT `question_count`
 - `_react_select()` closure for `selector_fn` — captures `state`/`config` without polluting cache interface
 - `topic` explicitly injected on all question dicts at construction point
 
@@ -227,6 +227,7 @@ Takes primitives not `StartRequest` — dependency boundary between core pipelin
 | `FeedbackComponents` local to `feedback.py` | Internal LLM output schema, not an inter-agent contract |
 | `compose()` returns `tuple[str, str]` | `execute()` needs `used_template` for `previous_feedback_structures` |
 | `CircuitBreaker` injected into QS, not instantiated | Supervisor owns and resets it — Inversion of Control |
+| Topic soft priority filter | Hard exclusion prevented topic reappearance after first visit. Uncovered-first + cycle-back allows natural topic revisits while still respecting plan sequence |
 
 ---
 
@@ -306,7 +307,7 @@ Module-level: `PlanOutput` Pydantic model, `INTERVIEW_PLAN_PROMPT`, `_build_plan
 
 ### Key Interfaces (Session 10)
 
-**`AgentRegistry(complex_llm, fast_llm, rag_service, cache_store, consistency_samples=1)`**
+**`AgentRegistry(complex_llm, fast_llm, rag_service, cache_store, available_topics, consistency_samples=1)`**
 - Plain class, all agents as public attributes — direct access (`registry.evaluator`, `registry.supervisor` etc.)
 - `TrendAnalyzer` instantiated internally — no external deps, caller has no reason to control it
 - Instantiation order enforced: `SupervisorAgent` first (creates `CircuitBreaker`) → `QuestionSelectorAgent` (consumes `supervisor.circuit_breaker`)
@@ -370,6 +371,13 @@ Module-level: `PlanOutput` Pydantic model, `INTERVIEW_PLAN_PROMPT`, `_build_plan
 | `start_graph` state not seeded into checkpointer | `scripts/smoke_test.py` | First `interview_graph.ainvoke()` must pass `{**start_result, "candidate_response": ...}` — subsequent turns pass only `{"candidate_response": ...}` |
 | `topic` mismatch — LLM generates free-form topic names | `src/agents/supervisor.py` | Added `available_topics: list[str]` to `SupervisorAgent.__init__` and plan prompt. Prompt explicitly constrains `topic_sequence` to known ChromaDB topics |
 | `AgentRegistry` missing `available_topics` | `src/graph/agent_registry.py` | Added `available_topics: list[str]` parameter. Passed through to `SupervisorAgent` |
+
+### Post-Smoke-Test Fixes (Retrieval Layer)
+
+| Fix | Location | Detail |
+|-----|----------|--------|
+| Topic hard-exclusion → soft priority filter | `src/agents/question_selector.py` `_get_next_topic_from_plan()` | `uncovered = [t for t in topic_sequence if t not in topics_covered]`. `remaining = uncovered if uncovered else topic_sequence`. When all topics covered, cycles back to start of sequence instead of calling `_select_weakest_topic()`. Prevents topics from being permanently exhausted after one visit |
+| Cross-session question diversity | `src/rag/retriever.py` `retrieve_questions()` | Fetches pool of `min(n*4, 20)` from ChromaDB in a single query, then `random.sample(results, min(n, len(results)))` before returning. Prevents same top-k question appearing first every session. Single fetch — no latency penalty |
 
 ### Architectural Decisions from Smoke Test
 

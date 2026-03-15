@@ -43,11 +43,14 @@ logger = get_logger(__name__)
 # ── Hardcoded test input ─────────────────────────────────────────────────────
 # Deliberately partial answer (~6/10) to trigger follow-up path
 CANDIDATE_RESPONSE = """
-RAG is a way to provide extra context through retrieval and inject it into LLM.
+Overfitting occurs when a model performs well on test data but poorly 
+on training data. This happens because the model is too simple and 
+cannot capture the patterns in the test set. The solution is to 
+increase model complexity by adding more layers or parameters.
 """
 
 # Force a known topic so CANDIDATE_RESPONSE stays relevant regardless of plan
-FORCED_TOPIC = "retrieval augmented generation"
+FORCED_TOPIC = "classification"
 
 SEPARATOR = "─" * 60
 

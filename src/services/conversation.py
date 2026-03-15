@@ -11,21 +11,20 @@ logger = get_logger(__name__)
 
 SUMMARIZATION_PROMPT = ChatPromptTemplate.from_messages([
     ("system",
-     "You are a technical expert and your task is to summarize an AI interview"
-     "for context continuity. Create a concise summary which should contain:\n"
-     "- Topic covered\n"
+     "You are a technical expert summarizing an AI interview for context continuity. "
+     "Create a concise summary containing:\n"
+     "- Topics covered (topic names and concept labels only)\n"
      "- Key strengths demonstrated\n"
      "- Key weaknesses and gaps identified\n"
-     "- Any misconceptions addressed\n"
-     "DO NOT include full question or answer text, no sort of numerical scores"
-     "or verbose descriptions and reasoning of scores."),
-     (
-         "human", (
-             "Existing summary:\n{existing_summary}\n"
-             "New turns to incorporate:\n{new_turns}\n"
-             "Updated Summary:"
-         )
-     )
+     "- Any misconceptions addressed\n\n"
+     "Include topic names, concept labels, and performance patterns only. "
+     "One sentence per topic maximum.\n"
+     "DO NOT include full question or answer text, numerical scores, "
+     "or verbose reasoning."),
+    ("human",
+     "Existing summary:\n{existing_summary}\n\n"
+     "New turns to incorporate:\n{new_turns}\n\n"
+     "Updated Summary:")
 ])
 
 class ConversationManager:

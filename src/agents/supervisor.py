@@ -58,28 +58,29 @@ class PlanOutput(BaseModel):
 
 
 INTERVIEW_PLAN_PROMPT = ChatPromptTemplate.from_messages([
-    ("system", (
-        "You are an AI interview planner. Create a structured plan.\n"
-        "Return valid JSON with: topic_sequence, difficulty_curve, "
-        "time_allocation, focus_areas.\n"
-        "difficulty_curve has ONE entry per topic (not per question).\n\n"
-        "IMPORTANT: topic_sequence MUST only contain topics from this list:\n"
-        "{available_topics}\n"
-        "Do not invent new topic names.\n"
-        "time_allocation must map each topic name to minutes as a flat dict. "
-        "Example: {{\"classification\": 5, \"feature_selection\": 6}}. "
-        "Every topic in topic_sequence must have an entry. "
-        "Total must equal time_budget_minutes."
-    )),
-    ("human", (
-        "Difficulty: {difficulty}\n"
-        "Focus topics: {focus_topics}\n"
-        "Time budget: {time_budget} minutes\n"
-        "Target questions: {target_questions}\n"
-        "Available topics: {available_topics}"
-    ))
+    ("system",
+     "You are an AI interview planner. Create a structured interview plan.\n"
+     "Return valid JSON with exactly these keys: "
+     "topic_sequence, difficulty_curve, time_allocation, focus_areas.\n\n"
+     "Rules:\n"
+     "- topic_sequence MUST only contain topics from the available_topics list. "
+     "Do not invent new topic names.\n"
+     "- difficulty_curve has ONE entry per topic (not per question). "
+     "Values must be exactly one of: \"easy\", \"medium\", \"hard\".\n"
+     "  Example: if topic_sequence is [\"transformers\", \"RAG\"], "
+     "difficulty_curve must be [\"medium\", \"hard\"]\n"
+     "- time_allocation must map each topic name to minutes as a flat dict. "
+     "Example: {{\"transformers\": 8, \"RAG\": 7}}. "
+     "Every topic in topic_sequence must have an entry. "
+     "Total must equal time_budget_minutes exactly.\n"
+     "- focus_areas is a list of strings describing key concepts to emphasize."),
+    ("human",
+     "Difficulty: {difficulty}\n"
+     "Focus topics: {focus_topics}\n"
+     "Time budget: {time_budget} minutes\n"
+     "Target questions: {target_questions}\n"
+     "Available topics: {available_topics}")
 ])
-
 def _build_plan_chain(complex_llm):
     return (INTERVIEW_PLAN_PROMPT
             | complex_llm.with_structured_output(PlanOutput)).with_retry(

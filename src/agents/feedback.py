@@ -124,36 +124,41 @@ class FeedbackComposer:
         return " ".join(result.split()), structure
     
 FEEDBACK_PROMPT = ChatPromptTemplate.from_messages([
-    ("system", (
-        "You are an interview feedback generator. Generate constructive feedback components.\n"
-        "NEVER reveal scores. NEVER say 'you missed X'. NEVER use forbidden phrases.\n\n"
-        "Tone guidance: {tone_guidance}\n\n"
-        "If concept context is provided below, subtly weave it into your gap_hint. "
-        "If empty, ignore it.\n"
-        "Concept context: {concept_context}\n"
-        "Generate feedback between 15-200 words. "
-        "Never generate fewer than 15 words regardless of score band.\n"
-        "Feedback must address the QUESTION that was asked, not just what the candidate said. "
-        "If the candidate answered off-topic, hint them toward the actual question's concepts. "
-        "Never introduce concepts from the candidate's response if they are irrelevant to the question."
-    )),
-    ("human", (
-        "Score band: {score_band}\n"
-        "Question asked: {question}\n"
-        "Candidate response: {response}"
-    ))
+    ("system",
+     "You are an interview feedback generator. Generate constructive feedback components.\n"
+     "NEVER reveal scores. NEVER say 'you missed X'. NEVER use forbidden phrases.\n\n"
+     "CRITICAL: Do NOT give away the direct answer, complete definitions, or full solutions "
+     "to the question. Your goal is to guide and hint, acting as an interviewer prompting "
+     "the candidate to think.\n\n"
+     "Tone guidance: {tone_guidance}\n\n"
+     "If concept_context is provided below, use it ONLY to form a subtle hint or a guiding "
+     "question. Do NOT repeat the concept explanation directly to the candidate.\n"
+     "If concept_context is empty, generate feedback based solely on the question and response. "
+     "Do not reference or acknowledge the absence of concept context.\n"
+     "Concept context: {concept_context}\n\n"
+     "Generate feedback between 15-200 words. "
+     "Never generate fewer than 15 words regardless of score band.\n"
+     "Feedback must address the QUESTION that was asked, not just what the candidate said. "
+     "If the candidate answered off-topic, hint them toward the actual question's concepts. "
+     "Never introduce concepts from the candidate's response if they are irrelevant to the question."),
+    ("human",
+     "Score band: {score_band}\n"
+     "Question asked: {question}\n"
+     "Candidate response: {response}")
 ])
 
 REPETITION_CHECK_PROMPT = ChatPromptTemplate.from_messages([
     ("system",
-     "Check if new feedback is semantically similar to recent feedback. "
-     "Respond with ONLY 'similar' or 'different' and one sentence explaining why."
-     ),
-    ("human", (
-        "New feedback:\n{new_feedback}\n\n"
-        "Recent feedback (last 2 turns):\n{recent_feedbacks}"
-    ))
-
+     "Check if new feedback is semantically similar to recent feedback.\n\n"
+     "'Similar' means the feedback conveys the same core message or uses the same framing "
+     "even if worded differently.\n"
+     "'Different' means it takes a meaningfully different angle.\n\n"
+     "Respond with exactly two lines:\n"
+     "Line 1: similar OR different\n"
+     "Line 2: One sentence explanation."),
+    ("human",
+     "New feedback:\n{new_feedback}\n\n"
+     "Recent feedback (last 2 turns):\n{recent_feedbacks}")
 ])
 
 def build_feedback_chain(fast_llm: BaseChatModel):
