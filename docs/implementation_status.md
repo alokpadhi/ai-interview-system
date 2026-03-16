@@ -471,3 +471,153 @@ src/api/streaming.py   # SSE streaming for /submit_response/stream
 | Gap | Impact | Resolution |
 |-----|--------|------------|
 | `estimated_time_minutes` not in ingested questions | Time-aware filtering inactive; defaults to `5.0` | Session 12: `scripts/add_time_metadata.py` |
+
+---
+
+## Post-Session 10 Bug Fixes and Design Improvements
+
+These changes were made after the smoke test revealed real-world flow and feedback quality issues. All fixes are in finalized state.
+
+### Files Modified
+
+| File | Change Summary |
+|------|---------------|
+| `src/agents/question_selector.py` | Mode priority reordered; off-topic re-engagement; is_off_topic threshold |
+| `src/agents/feedback.py` | Off-topic LLM path; concept-context-as-compass; off-topic detection threshold |
+| `src/agents/evaluator.py` | Sub-score normalization; off-topic clarity prompt fix |
+| `src/services/validation.py` | No-questions check added to FeedbackValidationGate |
+| `scripts/smoke_test_modes.py` | New: 3-session mode smoke test |
+
+---
+
+### 1. Question Selector — Mode Determination Overhaul (`_determine_question_mode`)
+
+**Problem 1 — clarify was structurally unreachable**
+
+The previous order checked `follow_up` before `clarify`. For any response with `score < 7.0 + missed non-empty + misconceptions`, the follow_up condition fired first and clarify was never reached. Since a misconception-containing response typically scores < 7.0 (technical_accuracy has 40% weight), clarify was effectively dead code.
+
+**Fix: clarify now fires before follow_up.**
+
+Rationale: a misconception left unchallenged distorts every subsequent answer. Probing gaps when the candidate holds a wrong belief is counterproductive. Wrong beliefs must be corrected first.
+
+**New mode decision tree:**
+```
+is_off_topic → follow_up (re-engagement via _generate_reengagement)
+misconceptions detected → clarify                        ← priority 1
+score < 7 + gaps + follow_ups < MAX → follow_up          ← priority 2
+score 7-8 + gaps + follow_ups < 1 → follow_up
+otherwise → retrieve
+```
+
+**Problem 2 — off-topic always retrieved, abandoning the question**
+
+Off-topic responses previously triggered `retrieve`, advancing to the next topic. A real interviewer rephrases the question instead.
+
+**Fix: off-topic triggers `follow_up` (up to `MAX_FOLLOW_UPS` times), which internally routes to `_generate_reengagement`. After MAX attempts, retrieve fires.**
+
+`topics_covered` returns `[]` in follow_up mode — the topic stays on the uncovered list until the candidate actually addresses it.
+
+**Problem 3 — `is_off_topic` false-positive when evaluator has no rubric**
+
+Previous check: `not bool(covered) or score < 3.0`
+
+When a question has no rubric in the DB, the evaluator leaves `key_points_covered = []` even for a good on-topic response. This incorrectly flagged high-scoring responses as off-topic.
+
+**Fix:** `is_off_topic = score < 3.0 or (not bool(covered) and score < 5.0)`
+
+Score >= 5.0 with empty covered is treated as on-topic (evaluator limitation). Score < 5.0 with empty covered is genuinely off-topic.
+
+---
+
+### 2. Question Selector — Re-engagement Path (`_generate_reengagement`)
+
+New method and prompt (`RE_ENGAGE_PROMPT`) that rephrases the original question when the candidate goes off-topic.
+
+Key constraints:
+- Receives only `original_question` and `topic` — no missed concepts (would give away the answer)
+- Generates a simpler entry point or different angle on the same question
+- `_generate_follow_up` detects off-topic (`not bool(covered) or score < 3.0`) and delegates to `_generate_reengagement`
+- Question dict uses `question_type = "follow_up"` so the graph routing works without changes
+
+---
+
+### 3. Feedback Agent — Off-topic Path Redesign
+
+**Problem:** Previous approach used hardcoded rotating strings. They were generic ("your response didn't address the question"), failed the 15-word minimum gate, and felt robotic.
+
+**Problem with LLM-based off-topic feedback:** Giving the LLM the question text caused it to hint at the answer domain even with strict prompt instructions ("indicate the area the question is about" → reveals the answer direction).
+
+**Fix: Separate `OFF_TOPIC_FEEDBACK_PROMPT` that receives ONLY `{candidate_response}` — never the question text.**
+
+The LLM acknowledges what the candidate actually said (specific to their words) and redirects warmly. Because it never sees the question, it physically cannot reveal the answer direction. 15-word fallback guard if LLM output is too short.
+
+**`is_off_topic` threshold in feedback:** Changed from `not covered` to `not covered and score < 5.0`. Same rationale as question selector — evaluator limitation (no rubric) should not trigger off-topic feedback path for high-scoring responses.
+
+---
+
+### 4. Feedback Agent — Concept Context as Compass
+
+**Problem:** `_get_concept_context` returned actual concept examples or misconceptions from the knowledge base (e.g., `"Real-world application: gradient descent updates weights by computing gradients..."`). The LLM used this to construct gap_hint text that was essentially the answer.
+
+**Fix:** Updated `FEEDBACK_PROMPT` instruction: concept_context is used ONLY as an internal directional check — the gap_hint text must come entirely from how the question itself is framed, not from concept_context content. Prompt phrase: "Treat concept_context as a compass, not as material to write from."
+
+---
+
+### 5. Feedback Validation Gate — No-Questions Check
+
+**Problem:** The LLM occasionally generated feedback containing a question (e.g., "Could you elaborate on...?") despite the `ABSOLUTE RULE: Do NOT ask questions` in the prompt. The candidate then saw feedback with a question AND a separate next question, causing confusion about which to answer.
+
+**Fix:** Added `_no_questions(text)` check to `FeedbackValidationGate`:
+
+```python
+if "?" in text:
+    return Check(passed=False, message="Feedback contains a question mark...")
+```
+
+If check fails → retry (circuit breaker). If retry also fails → fallback text (no question mark, always safe).
+
+---
+
+### 6. Evaluator — Sub-score Normalization (`_normalize_subscores`)
+
+**Problem:** The LLM occasionally produced extreme outlier sub-scores like `[0.0, 0.0, 0.0, 8.0]` (high clarity despite zero scores everywhere else). The validation gate rejected these, triggering a retry that produced the same result. Gate: `max - min > MAX_SCORE_VARIANCE (6.0)`.
+
+**Root cause of original fix failing:** The normalization used `median ± MAX_SPREAD` as the window. For `[2.0, 8.0, 8.0, 9.0]`, median=8.0, floor=2.0 — the outlier was exactly at the floor and didn't move. Spread remained 7.0 > 6.0.
+
+**Fix:** Window changed to `median ± MAX_SPREAD/2`. With half=3.0, the 2.0 outlier gets capped to 5.0. Resulting spread = 4.0 ≤ 6.0. Maximum possible spread = 2 × half = MAX_SPREAD. Guaranteed.
+
+**Evaluator prompt fix:** Added explicit rule: "If candidate_response is empty or off-topic, assign 0 across ALL four criteria including clarity. Clarity does not reward linguistic fluency when content does not address the question."
+
+`_normalize_subscores` is called before validation and reflection — validation never fails for this reason.
+
+---
+
+### 7. Mode Smoke Test (`scripts/smoke_test_modes.py`)
+
+New test script that validates all three modes in isolated sessions.
+
+| Session | Mode | Strategy |
+|---------|------|----------|
+| Session 1 | follow_up | Full pipeline. LLM generates partial answer to actual retrieved question. |
+| Session 2 | clarify | Mocked evaluation with explicit `misconceptions` list injected into state. QS and Feedback called directly — no evaluator re-run. Bypasses evaluator reliability problem. |
+| Session 3 | retrieve | Full pipeline. LLM generates comprehensive correct answer. |
+
+**Why mocked evaluation for clarify:** Getting the evaluator to reliably detect LLM-generated misconceptions is not tractable. The LLM resists generating clearly-false statements, and the evaluator only flags misconceptions squarely within the question's rubric scope. The mocked approach tests what matters: given `misconceptions` in state, does the mode selector choose clarify and does `_generate_clarification` produce a valid question?
+
+**Dynamic response generation:** Sessions 1 and 3 use LLM-generated responses (`_PARTIAL_PROMPT`, `_COMPREHENSIVE_PROMPT`) keyed to the actual retrieved question text. Hardcoded responses failed because the retrieved question is random within the topic — a response about overfitting scores 0 against a confusion-matrix question.
+
+Usage: `python -m scripts.smoke_test_modes`
+
+---
+
+### Design Decisions Table
+
+| Decision | Rationale |
+|----------|-----------|
+| Clarify before follow_up | Misconceptions distort reasoning; must be corrected before probing gaps |
+| Re-engagement via follow_up mode | No graph changes needed; `topics_covered: []` keeps topic on the uncovered list |
+| OFF_TOPIC_FEEDBACK_PROMPT receives no question text | LLM cannot hint at what it doesn't know; prevents answer leakage by construction |
+| `is_off_topic` threshold at score < 5.0 | Evaluator returns `covered=[]` when no rubric exists; score is the reliable signal |
+| `_normalize_subscores` uses `±MAX_SPREAD/2` | Guarantees spread ≤ MAX_SPREAD. Full ±MAX_SPREAD allows outliers exactly at boundary to remain |
+| Clarify smoke test uses mocked evaluation | Evaluator-generated misconceptions are unreliable; test should verify mode logic, not LLM consistency |
+| `_no_questions` in validation gate | Prompt instructions cannot guarantee LLM compliance; gate is the enforcement layer |

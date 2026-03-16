@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
 from langchain_core.language_models import BaseChatModel
+from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnableConfig
 
@@ -26,6 +27,25 @@ class FeedbackComponents(BaseModel):
     transition_phrase: str = Field(
         description="Natural transition; e.g building on that or can be empty"
     )
+
+OFF_TOPIC_FEEDBACK_PROMPT = ChatPromptTemplate.from_messages([
+    ("system",
+     "You are a senior technical interviewer giving brief, conversational feedback.\n"
+     "The candidate's response went in a different direction from what was asked.\n\n"
+     "Write 1-3 sentences that:\n"
+     "1. Briefly acknowledge what the candidate actually talked about (be specific to their words)\n"
+     "2. Note warmly but directly that it didn't address the question\n\n"
+     "Tone: warm, direct, human — like a senior colleague, not a grading system.\n\n"
+     "HARD RULES:\n"
+     "- Do NOT mention, name, or hint at what the question was asking about\n"
+     "- Do NOT reveal any concept, term, or domain from the correct answer\n"
+     "- Do NOT ask a question — end with a statement\n"
+     "- Do NOT be robotic. Reference what the candidate actually said.\n"
+     "- Between 20 and 50 words"),
+    ("human",
+     "Candidate's response: {candidate_response}")
+])
+
 
 class FeedbackComposer:
     """
@@ -126,21 +146,31 @@ class FeedbackComposer:
 FEEDBACK_PROMPT = ChatPromptTemplate.from_messages([
     ("system",
      "You are an interview feedback generator. Generate constructive feedback components.\n"
-     "NEVER reveal scores. NEVER say 'you missed X'. NEVER use forbidden phrases.\n\n"
+     "NEVER reveal scores. NEVER say 'you missed X'. NEVER use forbidden phrases.\n"
+     "NEVER ask questions of any kind — no clarifying questions, no rhetorical questions, "
+     "no 'can you explain...' constructions. Questions are the exclusive responsibility "
+     "of the question selector. Feedback is observational and directional only.\n\n"
      "CRITICAL: Do NOT give away the direct answer, complete definitions, or full solutions "
-     "to the question. Your goal is to guide and hint, acting as an interviewer prompting "
-     "the candidate to think.\n\n"
+     "to the question. Write as a thoughtful senior colleague giving honest, warm feedback — "
+     "not as a grading system producing an evaluation. "
+     "Your tone should feel conversational and human, like feedback after a "
+     "real interview exchange, not a performance report.\n\n"
      "Tone guidance: {tone_guidance}\n\n"
-     "If concept_context is provided below, use it ONLY to form a subtle hint or a guiding "
-     "question. Do NOT repeat the concept explanation directly to the candidate.\n"
+     "If concept_context is provided below, use it ONLY as an internal check that your feedback "
+     "is pointing in the right direction. "
+     "Do NOT paraphrase, quote, echo, or derive any term, mechanism, process, or example from it. "
+     "The gap_hint text must come entirely from how the question itself is framed — "
+     "not from concept_context content. Treat concept_context as a compass, not as material to write from. "
      "If concept_context is empty, generate feedback based solely on the question and response. "
      "Do not reference or acknowledge the absence of concept context.\n"
      "Concept context: {concept_context}\n\n"
      "Generate feedback between 15-200 words. "
      "Never generate fewer than 15 words regardless of score band.\n"
      "Feedback must address the QUESTION that was asked, not just what the candidate said. "
-     "If the candidate answered off-topic, hint them toward the actual question's concepts. "
-     "Never introduce concepts from the candidate's response if they are irrelevant to the question."),
+     "Never introduce concepts from the candidate's response if they are irrelevant to the question.\n\n"
+     "ABSOLUTE RULE: Do NOT ask questions of any kind. No clarifying questions, "
+     "no rhetorical questions, no 'can you explain...', no 'can you think about...' "
+     "constructions. End every feedback with a statement, never a question mark."),
     ("human",
      "Score band: {score_band}\n"
      "Question asked: {question}\n"
@@ -183,49 +213,112 @@ class FeedbackAgent:
         self.cache_store = cache_store
         self.feedback_chain = build_feedback_chain(fast_llm)
         self.repetition_chain = REPETITION_CHECK_PROMPT | fast_llm
+        self.off_topic_chain = (
+            OFF_TOPIC_FEEDBACK_PROMPT | fast_llm | StrOutputParser()
+        )
         self.composer = FeedbackComposer()
         self.validation_gate = ValidationGateRegistry().get("feedback")
         self.circuit_breaker = CircuitBreaker(max_retries=1)
 
     def _get_tone_guidance(self, score: float) -> str:
         if score >= 8.0:
-            return "Brief, genuine acknowledgment. No need to elaborate."
+            return (
+                "Genuine and brief. Acknowledge what landed well without overdoing it. "
+                "One natural observation — no elaboration needed."
+            )
         elif score >= 6.0:
-            return "Encouraging but direct. Hint at depth opportunity."
+            return (
+                "Encouraging but honest. Acknowledge the solid foundation, "
+                "then steer toward the depth that's missing. "
+                "Sound like someone who wants them to succeed."
+            )
         elif score >= 4.0:
-            return "Supportive. Focus on the attempt, guide gently."
-        return "Patient. No praise openers. Direct but kind."
-    
+            return (
+                "Supportive and patient. Acknowledge the attempt genuinely. "
+                "Guide them toward the right framing without revealing it. "
+                "Avoid any tone that feels like a correction."
+            )
+        return (
+            "Calm and grounding. No praise openers. "
+            "Gently redirect toward the actual question's territory. "
+            "Sound like a patient mentor, not a disappointed evaluator."
+        ) 
+    # async def _get_concept_context(
+    #         self,
+    #         state: InterviewState,
+    #         eval_data: dict,
+    #         score: float
+    # ) -> str:
+    #     # high score; no enrichment needed
+    #     if score >= 7.0:
+    #         return ""
+        
+    #     missed = eval_data.get("key_points_missed", [])
+    #     if not missed:
+    #         return ""
+        
+    #     # take only the first missed concept
+    #     concept = missed[0]
+
+    #     # check the cache first
+    #     cached = await self.cache_store.get_concept(state["interview_id"], concept)
+    #     if cached:
+    #         return cached.get("simple_explanation", "")
+        
+    #     # cache miss - call the tool
+    #     result = await concept_lookup.ainvoke({"concept_name": concept})
+
+    #     if result and result.get("found"):
+    #         await self.cache_store.set_concept(state["interview_id"], concept, result)
+    #         return result.get("simple_explanation", "")
+        
+    #     return ""
     async def _get_concept_context(
-            self,
-            state: InterviewState,
-            eval_data: dict,
-            score: float
-    ) -> str:
-        # high score; no enrichment needed
+        self,
+        state: InterviewState,
+        eval_data: dict,
+        score: float
+        ) -> str:
+        # High score — no enrichment needed
         if score >= 7.0:
             return ""
-        
+
         missed = eval_data.get("key_points_missed", [])
         if not missed:
             return ""
-        
-        # take only the first missed concept
+
+        # Candidate is completely off-topic — concept context won't help redirect.
+        # Let feedback handle redirection on its own.
+        covered = eval_data.get("key_points_covered", [])
+        if score < 3.0 and not covered:
+            return ""
+
+        # Take only the first missed concept
         concept = missed[0]
 
-        # check the cache first
+        # Check cache first
         cached = await self.cache_store.get_concept(state["interview_id"], concept)
-        if cached:
-            return cached.get("simple_explanation", "")
-        
-        # cache miss - call the tool
-        result = await concept_lookup.ainvoke({"concept_name": concept})
+        result = cached
+        if not cached:
+            raw = await concept_lookup.ainvoke({"concept_name": concept})
+            if raw and raw.get("found"):
+                await self.cache_store.set_concept(state["interview_id"], concept, raw)
+                result = raw
 
-        if result and result.get("found"):
-            await self.cache_store.set_concept(state["interview_id"], concept, result)
-            return result.get("simple_explanation", "")
-        
-        return ""
+        if not result:
+            return ""
+
+        # Select context based on question mode:
+        # clarify → common misconception (directly relevant to wrong belief)
+        # follow_up / retrieve → real-world example (grounds hint without naming mechanism)
+        mode = state.get("question_mode", "retrieve")
+
+        if mode == "clarify":
+            misconceptions = result.get("common_misconceptions", [])
+            return f"Relevant misconception in this area: {misconceptions[0]}" if misconceptions else ""
+
+        examples = result.get("examples", [])
+        return f"Real-world application: {examples[0]}" if examples else ""
 
     async def _check_semantic_repetition(
             self,
@@ -279,7 +372,40 @@ class FeedbackAgent:
         score = eval_data["overall_score"]
         turn = state["question_count"]
 
-        # Concept Enrichment (condition RAG Tool call)
+        # Detect whether the candidate attempted the actual question topic.
+        # covered=[] can happen when the evaluator has no rubric and lists no key points,
+        # even for a good on-topic response. Trust the score: score >= 5.0 means
+        # the evaluator considered the response on-topic.
+        covered = eval_data.get("key_points_covered", [])
+        is_off_topic = not covered and score < 5.0
+
+        if is_off_topic:
+            # Use a separate LLM prompt that receives ONLY the candidate's response,
+            # never the question text. This makes feedback feel human and specific
+            # to what the candidate said, while making it impossible to leak the
+            # question's answer direction (the LLM can't hint at what it doesn't know).
+            try:
+                off_topic_text = await self.off_topic_chain.ainvoke(
+                    {"candidate_response": state["candidate_response"]},
+                    config=config
+                )
+                off_topic_text = off_topic_text.strip()
+            except Exception:
+                off_topic_text = ""
+
+            # Fallback if LLM output is too short to pass validation
+            if len(off_topic_text.split()) < 15:
+                off_topic_text = (
+                    "It seems like your response touched on a different area than "
+                    "what the question was asking about. Let's refocus on the question."
+                )
+            return {
+                "current_feedback": off_topic_text,
+                "previous_feedback_structures": ["off_topic_redirect"],
+                "recent_feedbacks": [off_topic_text],
+            }
+
+        tone_guidance = self._get_tone_guidance(score)
         concept_context = await self._get_concept_context(state, eval_data, score)
 
         # LLM generates the components (pydantic)
@@ -287,7 +413,7 @@ class FeedbackAgent:
             "question": state["current_question"]["text"],
             "response": state["candidate_response"],
             "score_band": self.composer._get_score_band(score),
-            "tone_guidance": self._get_tone_guidance(score),
+            "tone_guidance": tone_guidance,
             "concept_context": concept_context,
         }, config=config)
 

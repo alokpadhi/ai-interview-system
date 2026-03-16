@@ -65,6 +65,23 @@ CLARIFICATION_PROMPT = ChatPromptTemplate.from_messages([
      "Detected Misconception: {misconception}")
 ])
 
+RE_ENGAGE_PROMPT = ChatPromptTemplate.from_messages([
+    ("system",
+     "You are an experienced technical interviewer.\n\n"
+     "The candidate did not address the question that was asked.\n"
+     "Rephrase the original question from a slightly different angle or a simpler "
+     "entry point to help the candidate understand what you are looking for.\n\n"
+     "Constraints:\n"
+     "- ONE question only. One sentence.\n"
+     "- Must be a genuine rephrasing or simpler version of the original — not a new topic.\n"
+     "- Do NOT give hints about the answer or partial solutions.\n"
+     "- Maintain an evaluative interviewer tone, not a tutoring tone.\n\n"
+     "Return ONLY the question text."),
+    ("human",
+     "Original Question: {original_question}\n"
+     "Topic: {topic}")
+])
+
 REACT_SELECTION_PROMPT = ChatPromptTemplate.from_messages([
     ("system",
      "You are managing the flow of a technical interview.\n\n"
@@ -107,6 +124,11 @@ def _build_clarify_chain(llm):
         wait_exponential_jitter=True
     )
 
+def _build_reengage_chain(llm):
+    parser = StrOutputParser()
+    reengage_chain = RE_ENGAGE_PROMPT | llm | parser
+    return reengage_chain.with_retry(stop_after_attempt=2, wait_exponential_jitter=True)
+
 def _build_selection_chain(llm):
     chain = REACT_SELECTION_PROMPT | llm.with_structured_output(QuestionSelection)
     return chain.with_retry(stop_after_attempt=2, wait_exponential_jitter=True)
@@ -136,6 +158,7 @@ class QuestionSelectorAgent:
         self.cache_store = cache_store
         self.follow_up_chain = _build_followup_chain(complex_llm)
         self.clarify_chain = _build_clarify_chain(complex_llm)
+        self.reengage_chain = _build_reengage_chain(complex_llm)
         self.react_select_chain = _build_selection_chain(fast_llm)
         self.validation_gates = ValidationGateRegistry().get("question_selector")
         self.circuit_breaker = circuit_breaker
@@ -190,26 +213,46 @@ class QuestionSelectorAgent:
     def _determine_question_mode(
             self, state: InterviewState, remaining_time: float
     ) -> str:
-        # if state["question_count"] == 0:
-        #     return "retrieve"
         if not state.get("current_evaluation"):
             return "retrieve"
         if remaining_time < 5:
             return "retrieve"
-        
+
         eval_data = state["current_evaluation"]
         score = eval_data["overall_score"]
         missed = eval_data.get("key_points_missed", [])
+        covered = eval_data.get("key_points_covered", [])
         misconceptions = eval_data.get("misconceptions", [])
         follow_ups = state.get("follow_up_count", 0)
 
+        # Off-topic: candidate answered a completely different question.
+        # A real interviewer rephrases rather than abandoning the topic.
+        # _generate_follow_up detects off-topic internally and routes to re-engagement.
+        #
+        # NOTE: covered=[] can occur when the evaluator has no rubric for the question
+        # and lists no specific key points, even for a good on-topic response.
+        # Trust the score: score >= 5.0 signals an on-topic response regardless of
+        # whether covered is populated. Only flag off-topic when score is genuinely low.
+        is_off_topic = score < 3.0 or (not bool(covered) and score < 5.0)
+        if is_off_topic:
+            if follow_ups < self.MAX_FOLLOW_UPS:
+                return "follow_up"   # _generate_follow_up → _generate_reengagement
+            return "retrieve"        # Give up after MAX attempts, move to next topic
+
+        # On-topic paths below — candidate addressed the question.
+
+        # clarify takes priority over follow_up.
+        # A misconception left unchallenged will distort every subsequent answer.
+        # Probing gaps when the candidate holds a wrong belief is counterproductive.
         if misconceptions and follow_ups < self.MAX_FOLLOW_UPS:
             return "clarify"
+
+        # follow_up → on-topic but incomplete (no misconceptions, just gaps)
         if score < 7.0 and missed and follow_ups < self.MAX_FOLLOW_UPS:
             return "follow_up"
         if 7.0 <= score < 8.0 and missed and follow_ups < 1:
             return "follow_up"
-        
+
         return "retrieve"
     
     async def _retrieve_question(
@@ -349,6 +392,30 @@ class QuestionSelectorAgent:
         
         return "stable"
     
+    async def _generate_reengagement(
+            self,
+            state: InterviewState,
+            config: RunnableConfig
+    ) -> dict:
+        """Rephrases the current question when the candidate answered off-topic."""
+        original = state["current_question"]
+
+        response = await self.reengage_chain.ainvoke({
+            "original_question": original["text"],
+            "topic": original.get("topic", "general"),
+        }, config=config)
+
+        return {
+            "id": f"{original['id']}_reengage_{state.get('follow_up_count', 0) + 1}",
+            "text": response.strip(),
+            "question_type": "follow_up",
+            "topic": original.get("topic", "general"),
+            "difficulty": original.get("difficulty", "medium"),
+            "parent_question_id": original.get("parent_question_id") or original["id"],
+            "target_concepts": original.get("target_concepts", []),
+            "estimated_time_minutes": 3,
+        }
+
     async def _generate_follow_up(
             self,
             state: InterviewState,
@@ -356,6 +423,14 @@ class QuestionSelectorAgent:
     ) -> dict:
         eval_data = state["current_evaluation"]
         original = state["current_question"]
+
+        # Off-topic response: rephrase the question instead of probing missed points.
+        # Probing missed points for an off-topic response would directly reveal the answer.
+        covered = eval_data.get("key_points_covered", [])
+        score = eval_data["overall_score"]
+        if not bool(covered) or score < 3.0:
+            return await self._generate_reengagement(state, config)
+
         missed = eval_data.get("key_points_missed", [])[:2]
 
         response = await self.follow_up_chain.ainvoke(
@@ -370,10 +445,10 @@ class QuestionSelectorAgent:
             "id": f"{original['id']}_followup_{state.get('follow_up_count', 0) + 1}",
             "text": response.strip(),
             "question_type": "follow_up",
-            "topic": original.get("topic", "general"),  # Always inject topic
+            "topic": original.get("topic", "general"),
             "difficulty": original.get("difficulty", "medium"),
             "parent_question_id": original["id"],
-            "target_concepts": missed,  # Dynamic rubric for drift detection
+            "target_concepts": missed,
             "estimated_time_minutes": 3
         }
     

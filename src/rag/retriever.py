@@ -76,6 +76,7 @@ class VectorRetriever:
             # 3. Format results using _format_results()
             # 4. Filter out exclude_ids (already done in _format_results)
             results = self._format_results(raw_results, exclude_ids=exclude_ids)
+            logger.debug(f"Pool size before sampling: {len(results)} | topic={topic} | difficulty={difficulty}")
             results = random.sample(results, min(n_result, len(results)))
             # 5. Log result count
             logger.info(f"Retrieved {len(results)} questions (after exclusions)")

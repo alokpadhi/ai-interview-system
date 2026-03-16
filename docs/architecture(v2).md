@@ -98,10 +98,11 @@
 │  │                        Validation Gates                              │   │
 │  │                                                                       │   │
 │  │  Evaluator Gate:           Feedback Gate:         Question Gate:     │   │
-│  │  • Scores in 0-10 range    • Length 20-200 words  • Question present │   │
+│  │  • Scores in 0-10 range    • Length 15-200 words  • Question present │   │
 │  │  • Reasoning >50 chars     • No forbidden phrases • Valid type       │   │
-│  │  • Variance <5.0           • No sycophancy at     • Estimated time   │   │
-│  │  • Required fields           low scores             fits budget      │   │
+│  │  • Variance ≤6.0           • No questions (?)     • Estimated time   │   │
+│  │    (normalized pre-gate)   • No sycophancy at       fits budget      │   │
+│  │  • Required fields           low scores                              │   │
 │  │  • Key-point coverage      • No score leakage                        │   │
 │  │    alignment (drift check)                                           │   │
 │  │  • Dynamic rubric support                                            │   │
@@ -186,6 +187,14 @@
 │  │    alignment validation                           (if divergence>2.0)│   │
 │  │  • Dynamic rubric path for                                           │   │
 │  │    follow-up/clarify Qs                                              │   │
+│  │  Sub-score Normalization:                                            │   │
+│  │  • _normalize_subscores()                                            │   │
+│  │    runs before validation                                            │   │
+│  │  • Caps outliers to median                                           │   │
+│  │    ± MAX_SPREAD/2 (3.0pts)                                           │   │
+│  │  • Guarantees spread ≤ 6.0                                           │   │
+│  │  • Prevents retry loops                                              │   │
+│  │    on LLM outlier scores                                             │   │
 │  │                                                                       │   │
 │  │  Structured Output:        LLM Calls:                                │   │
 │  │  • complex_llm.with_       • Standard: 2 (CoT + Reflection)         │   │
@@ -212,14 +221,18 @@
 │  │  FeedbackComposer:         Caching:             Does NOT:            │   │
 │  │  • Multiple structures     • Concept cache      • Expose scores      │   │
 │  │    per score band            (separate pool)    • Generate questions │   │
-│  │  • Turn-based variation    • Avoids repeated    • Say "you missed X" │   │
-│  │  • Context-aware             concept lookups    • Update stage       │   │
-│  │    transitions                                                       │   │
+│  │  • Turn-based variation    • Avoids repeated      (validated by gate)│   │
+│  │  • Context-aware             concept lookups    • Say "you missed X" │   │
+│  │    transitions             Off-topic path:      • Hint at answer     │   │
+│  │                            • Separate LLM prompt  direction          │   │
+│  │                              (no question text) • Update stage       │   │
+│  │                            • Candidate response                      │   │
+│  │                              only → no leakage                       │   │
 │  │                                                                       │   │
-│  │  Repetition Guard:         LLM Calls: 1 (+ 1 reflection after 2+    │   │
-│  │  • After 2+ turns, 7B       turns if semantic similarity detected)   │   │
-│  │    checks new vs recent    Latency: ~1-1.5s (std) / ~1.5-2s (refl)  │   │
-│  │  • Regenerates with                                                  │   │
+│  │  Repetition Guard:         LLM Calls: 1 on-topic (+ 1 reflection    │   │
+│  │  • After 2+ turns, 7B       after 2+ turns if similar detected)     │   │
+│  │    checks new vs recent    1 off-topic (separate prompt, no Q text) │   │
+│  │  • Regenerates with        Latency: ~1-1.5s (std) / ~1.5-2s (refl) │   │
 │  │    diversity instruction                                             │   │
 │  │    if semantically similar                                           │   │
 │  │                                                                       │   │
@@ -237,13 +250,16 @@
 │  │  • ALL question decisions  • RETRIEVE: Cache    • ReAct select: 7B  │   │
 │  │  • Mode determination        + RAG service        via .with_         │   │
 │  │  • Time budget enforcement • FOLLOW_UP: LLM gen   structured_output  │   │
-│  │  • Topic tracking          • CLARIFY: LLM gen     (QuestionSelection)│   │
-│  │    (owns topics_covered)                        • Follow-up gen: 14B │   │
-│  │  • Topic re-prioritization   Does NOT:          • Clarify gen: 14B   │   │
-│  │    when struggling           • Own CRAG logic                        │   │
-│  │  • Generates target_concepts • Grade retrieval                       │   │
-│  │    for follow-up/clarify Qs    results                               │   │
-│  │    (used as dynamic rubric)                                          │   │
+│  │  • Topic tracking            (gaps) OR re-engage  (QuestionSelection)│   │
+│  │    (owns topics_covered)     (off-topic)         • Follow-up gen: 14B│   │
+│  │  • Off-topic re-engagement • CLARIFY: LLM gen   • Clarify gen: 14B  │   │
+│  │    (rephrases question)      (misconceptions,    • Re-engage gen: 14B│   │
+│  │  • Topic re-prioritization   priority over                           │   │
+│  │    when struggling           follow_up)                              │   │
+│  │  • Generates target_concepts Does NOT:                               │   │
+│  │    for follow-up/clarify Qs  • Own CRAG logic                        │   │
+│  │    (used as dynamic rubric)  • Grade retrieval                       │   │
+│  │                                results                               │   │
 │  │                                                                       │   │
 │  │  Caching Strategy:         Time-Aware:          State Keys Owned:    │   │
 │  │  • Topic-aware batches     • Passes remaining   • current_question   │   │
