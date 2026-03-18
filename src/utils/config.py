@@ -50,6 +50,8 @@ class Settings(BaseSettings):
     langsmith_project: str = "ai-interview-system"
 
     consistency_samples: int = 1
+
+    checkpoint_db: Path = Path("data/checkpointer.db")
     
     # Logging
     log_level: str = "INFO"

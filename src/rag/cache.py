@@ -370,7 +370,7 @@ class InterviewCacheStore:
             )
         return removed
     
-    async def cleanup_abondoned_sessions(self) -> int:
+    async def cleanup_abandoned_sessions(self) -> int:
         """Periodic sweep: remove sessions older than threshold.
         Should be called from a background task.
         """
