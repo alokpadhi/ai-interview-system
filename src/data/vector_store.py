@@ -173,7 +173,7 @@ class VectorStore:
             where=where,
             where_document=where_document
         )
-
+        logger.debug(f"number of results in chromadb {len(results)}")
         return results
 
     

@@ -80,7 +80,7 @@ class EvaluatorValidationGate:
     LOW_COVERAGE_RATIO = 0.5
 
     # maximum allowed variance to check consistency
-    MAX_SCORE_VARIANCE = 5.0
+    MAX_SCORE_VARIANCE = 6.0
 
     # minimum reasoning length
     MIN_REASONING_CHARS = 50
@@ -307,7 +307,7 @@ class FeedbackValidationGate:
       3. No sycophancy at low scores (score < SYCOPHANCY_SCORE_THRESHOLD)
       4. No score leakage
     """
-    MIN_WORDS = 20
+    MIN_WORDS = 15
     MAX_WORDS = 200
 
     # check sycophancy only if score below 7.0
@@ -356,6 +356,7 @@ class FeedbackValidationGate:
         checks = [
             self._appropriate_length(text),
             self._no_forbidden_phrases(text),
+            self._no_questions(text),
             self._no_sycophancy_at_low_scores(text, evaluation_score),
             self._no_score_leakage(text),
         ]
@@ -381,6 +382,20 @@ class FeedbackValidationGate:
             return Check(passed=False, message=f"Feedback too long: {words} words (maximum {self.MAX_WORDS})")
         return Check(passed=True)
     
+    def _no_questions(self, text: str) -> Check:
+        """
+        Feedback must never contain questions directed at the candidate.
+        Questions belong exclusively to the question selector — if feedback
+        contains one, the candidate doesn't know which to answer.
+        A '?' anywhere in the text is sufficient signal.
+        """
+        if "?" in text:
+            return Check(
+                passed=False,
+                message="Feedback contains a question mark — feedback must be observational statements only"
+            )
+        return Check(passed=True)
+
     def _no_forbidden_phrases(self, text: str) -> Check:
         """Case-insensitive check across full feedback text."""
         text_lower = text.lower()

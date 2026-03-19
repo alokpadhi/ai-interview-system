@@ -21,96 +21,89 @@ class QuestionSelection(BaseModel):
     reasoning: str = Field(description="One sentence explaining the selection")
 
 FOLLOW_UP_PROMPT = ChatPromptTemplate.from_messages([
-    (
-        "system",
-        """
-        You are an experienced technical interviewer.
-
-        Your task is to generate a targeted follow-up question based on a candidate's response.
-
-        Goals:
-        - Probe the candidate's understanding of concepts they missed.
-        - Encourage deeper reasoning.
-        - Maintain a professional interviewer tone.
-
-        Constraints:
-        - Ask ONLY ONE question.
-        - Do NOT reveal the correct answer.
-        - Do NOT explicitly mention the missed points.
-        - The tone should be probing and evaluative, NOT teaching or explanatory.
-        - The question should naturally guide the candidate toward the missing concepts.
-
-        Return ONLY the question text."""
-    ),
-    (
-        "human",
-        """
-        Original Question: {original_question}\n
-        Candidate Response: {candidate_response}\n
-        Concepts the candidate missed: {missed_points}\n
-        Topic: {topic}
-        """
-    )
+    ("system",
+     "You are an experienced technical interviewer.\n\n"
+     "Your task is to generate a targeted follow-up question based on a candidate's response.\n\n"
+     "Goals:\n"
+     "- Probe the candidate's understanding of concepts they missed.\n"
+     "- Encourage deeper reasoning.\n"
+     "- Maintain a professional interviewer tone.\n\n"
+     "Constraints:\n"
+     "- Ask ONLY ONE question. One sentence. No sub-questions. No 'and also...' constructions.\n"
+     "- Do NOT reveal the correct answer.\n"
+     "- Do NOT explicitly mention the missed points.\n"
+     "- The tone should be probing and evaluative, NOT teaching or explanatory.\n"
+     "- The question should naturally guide the candidate toward the missing concepts.\n"
+     "- If missed_points is empty, generate a depth-probing question about the core "
+     "concept in the original question.\n\n"
+     "Return ONLY the question text."),
+    ("human",
+     "Original Question: {original_question}\n"
+     "Candidate Response: {candidate_response}\n"
+     "Concepts the candidate missed: {missed_points}\n"
+     "Topic: {topic}")
 ])
 
 CLARIFICATION_PROMPT = ChatPromptTemplate.from_messages([
-    (
-        "system",
-        """
-        You are a technical interviewer conducting a conceptual interview.
+    ("system",
+     "You are a technical interviewer conducting a conceptual interview.\n\n"
+     "Your goal is to ask a clarification question that helps the candidate "
+     "re-examine their reasoning and recognize a potential misconception.\n\n"
+     "Guidelines:\n"
+     "- Ask ONE concise clarification question. One sentence.\n"
+     "- Ground your question specifically in the misconception provided. "
+     "The question should make the candidate reconsider that specific claim, "
+     "not the topic generally.\n"
+     "- Encourage the candidate to rethink their explanation.\n"
+     "- Do NOT provide hints, corrections, or teaching.\n"
+     "- Maintain an interviewer tone rather than a tutor tone.\n"
+     "- The question should guide the candidate toward identifying the issue themselves.\n\n"
+     "Return ONLY the clarification question."),
+    ("human",
+     "Original Question: {original_question}\n"
+     "Candidate Response: {candidate_response}\n"
+     "Detected Misconception: {misconception}")
+])
 
-        Your goal is to ask a clarification question that helps the candidate
-        re-examine their reasoning and recognize a potential misconception.
-
-        Guidelines:
-        - Ask ONE concise clarification question.
-        - Encourage the candidate to rethink their explanation.
-        - Do NOT provide hints, corrections, or teaching.
-        - Maintain an interviewer tone rather than a tutor tone.
-        - The question should guide the candidate toward identifying the issue themselves.
-
-        Return ONLY the clarification question.
-        """
-    ),
-    (
-        "human",
-        """
-        Original Question: {original_question}\n
-        Candidate Response: {candidate_response}\n
-        Detected Misconception: {misconception}\n
-        """
-    )
+RE_ENGAGE_PROMPT = ChatPromptTemplate.from_messages([
+    ("system",
+     "You are an experienced technical interviewer.\n\n"
+     "The candidate did not address the question that was asked.\n"
+     "Rephrase the original question from a slightly different angle or a simpler "
+     "entry point to help the candidate understand what you are looking for.\n\n"
+     "Constraints:\n"
+     "- ONE question only. One sentence.\n"
+     "- Must be a genuine rephrasing or simpler version of the original — not a new topic.\n"
+     "- Do NOT give hints about the answer or partial solutions.\n"
+     "- Maintain an evaluative interviewer tone, not a tutoring tone.\n\n"
+     "Return ONLY the question text."),
+    ("human",
+     "Original Question: {original_question}\n"
+     "Topic: {topic}")
 ])
 
 REACT_SELECTION_PROMPT = ChatPromptTemplate.from_messages([
-    (
-        "system",
-        """
-        You are managing the flow of a technical interview.
-
-        Your task is to select the most appropriate next question from a list
-        of candidate questions.
-
-        Selection criteria:
-        1. The question should match the target difficulty level.
-        2. Avoid repeating recently covered topics.
-        3. Adapt to the candidate's performance trend.
-        4. Prefer questions that best evaluate conceptual understanding.
-
-        Instructions:
-        - Choose the SINGLE best question from the candidates.
-        - Return the `id` field of your selected question and a one sentence reasoning.
-        """
-    ),
-    (
-        "human",
-        """
-        Candidate Questions: {candidates}\n
-        Target Difficulty Level: {difficulty_level}\n
-        Recently Covered Topics: {topics_covered}\n
-        Candidate Performance Trend: {performance_trend}\n
-        """
-    )
+    ("system",
+     "You are managing the flow of a technical interview.\n\n"
+     "Your task is to select the most appropriate next question from a list "
+     "of candidate questions.\n\n"
+     "Each candidate question has: id, text, difficulty, topic. "
+     "Base your selection on text and difficulty primarily.\n\n"
+     "Selection criteria:\n"
+     "1. The question should match the target difficulty level.\n"
+     "2. Avoid repeating recently covered topics.\n"
+     "3. Adapt to the candidate's performance trend.\n"
+     "4. Prefer questions that best evaluate conceptual understanding.\n\n"
+     "Return ONLY a JSON object. No preamble. No explanation outside the JSON.\n"
+     "{{\n"
+     "  \"selected_id\": \"<id of chosen question>\",\n"
+     "  \"reasoning\": \"<one sentence>\"\n"
+     "}}"),
+    ("human",
+     "Candidate Questions: {candidates}\n"
+     "Target Difficulty Level: {difficulty_level}\n"
+     "Recently Covered Topics: {topics_covered}\n"
+     "Candidate Performance Trend: {performance_trend}")
 ])
 
 def _build_followup_chain(llm):
@@ -130,6 +123,11 @@ def _build_clarify_chain(llm):
         stop_after_attempt=2,
         wait_exponential_jitter=True
     )
+
+def _build_reengage_chain(llm):
+    parser = StrOutputParser()
+    reengage_chain = RE_ENGAGE_PROMPT | llm | parser
+    return reengage_chain.with_retry(stop_after_attempt=2, wait_exponential_jitter=True)
 
 def _build_selection_chain(llm):
     chain = REACT_SELECTION_PROMPT | llm.with_structured_output(QuestionSelection)
@@ -160,6 +158,7 @@ class QuestionSelectorAgent:
         self.cache_store = cache_store
         self.follow_up_chain = _build_followup_chain(complex_llm)
         self.clarify_chain = _build_clarify_chain(complex_llm)
+        self.reengage_chain = _build_reengage_chain(complex_llm)
         self.react_select_chain = _build_selection_chain(fast_llm)
         self.validation_gates = ValidationGateRegistry().get("question_selector")
         self.circuit_breaker = circuit_breaker
@@ -214,24 +213,46 @@ class QuestionSelectorAgent:
     def _determine_question_mode(
             self, state: InterviewState, remaining_time: float
     ) -> str:
-        if state["question_count"] == 0:
+        if not state.get("current_evaluation"):
             return "retrieve"
         if remaining_time < 5:
             return "retrieve"
-        
+
         eval_data = state["current_evaluation"]
         score = eval_data["overall_score"]
         missed = eval_data.get("key_points_missed", [])
+        covered = eval_data.get("key_points_covered", [])
         misconceptions = eval_data.get("misconceptions", [])
         follow_ups = state.get("follow_up_count", 0)
 
+        # Off-topic: candidate answered a completely different question.
+        # A real interviewer rephrases rather than abandoning the topic.
+        # _generate_follow_up detects off-topic internally and routes to re-engagement.
+        #
+        # NOTE: covered=[] can occur when the evaluator has no rubric for the question
+        # and lists no specific key points, even for a good on-topic response.
+        # Trust the score: score >= 5.0 signals an on-topic response regardless of
+        # whether covered is populated. Only flag off-topic when score is genuinely low.
+        is_off_topic = score < 3.0 or (not bool(covered) and score < 5.0)
+        if is_off_topic:
+            if follow_ups < self.MAX_FOLLOW_UPS:
+                return "follow_up"   # _generate_follow_up → _generate_reengagement
+            return "retrieve"        # Give up after MAX attempts, move to next topic
+
+        # On-topic paths below — candidate addressed the question.
+
+        # clarify takes priority over follow_up.
+        # A misconception left unchallenged will distort every subsequent answer.
+        # Probing gaps when the candidate holds a wrong belief is counterproductive.
         if misconceptions and follow_ups < self.MAX_FOLLOW_UPS:
             return "clarify"
+
+        # follow_up → on-topic but incomplete (no misconceptions, just gaps)
         if score < 7.0 and missed and follow_ups < self.MAX_FOLLOW_UPS:
             return "follow_up"
         if 7.0 <= score < 8.0 and missed and follow_ups < 1:
             return "follow_up"
-        
+
         return "retrieve"
     
     async def _retrieve_question(
@@ -240,14 +261,24 @@ class QuestionSelectorAgent:
             remaining_time: float,
             config: RunnableConfig
     ) -> tuple[dict, str]:
+        # Note: difficulty_level reflects current turn's value — Supervisor
+        # updates difficulty after fan-in, so first retrieval for a new topic
+        # uses previous turn's difficulty. Accepted tradeoff — takes effect
+        # on the following turn.
         topic = self._get_next_topic_from_plan(state)
         difficulty = state["difficulty_level"]
         session_id = state["interview_id"]
 
         # atomic select + mark: eliminates TOCTOU race
-        async def _select_fn(candidates: list[dict]) -> dict:
-            return await self._react_select(candidates, state, config)
-        
+        # NOTE: selector_fn receives RetrievalResult objects from the cache;
+        # convert to dicts for _react_select, then return the chosen dict.
+        async def _select_fn(candidates: list) -> dict:
+            candidate_dicts = [
+                c.to_question_dict() if hasattr(c, "to_question_dict") else c
+                for c in candidates
+            ]
+            return await self._react_select(candidate_dicts, state, config)
+
         selected = await self.cache_store.select_and_mark(
             session_id=session_id,
             topic=topic,
@@ -256,7 +287,7 @@ class QuestionSelectorAgent:
         )
 
         if selected is None:
-            # cache missed - retrive via crag
+            # cache missed - retrieve via crag
             crag_result = await self.rag.retrieve_with_crag(
                 topic=topic,
                 difficulty=difficulty,
@@ -264,6 +295,9 @@ class QuestionSelectorAgent:
                 remaining_time=remaining_time
             )
 
+            # Store RetrievalResult objects (not dicts) so CacheEntry.get_unused()
+            # can access .id as an attribute. to_question_dict() is called later
+            # inside _select_fn or at the fallback path.
             await self.cache_store.set_topic_questions(
                 session_id=session_id,
                 topic=topic,
@@ -280,7 +314,7 @@ class QuestionSelectorAgent:
             )
 
             if selected is None and crag_result.candidates:
-                selected = crag_result.candidates[0]
+                selected = crag_result.candidates[0].to_question_dict()
             elif selected is None:
                 selected = self._get_fallback_question()
 
@@ -320,7 +354,10 @@ class QuestionSelectorAgent:
         topic_sequence = plan.get("topic_sequence", [])
         topics_covered = state.get("topics_covered", [])
 
-        remaining = [t for t in topic_sequence if t not in topics_covered]
+        # remaining = [t for t in topic_sequence if t not in topics_covered]
+
+        uncovered = [t for t in topic_sequence if t not in topics_covered]
+        remaining = uncovered if uncovered else topic_sequence
 
         if not remaining:
             return self._select_weakest_topic(state)
@@ -328,7 +365,7 @@ class QuestionSelectorAgent:
         if state.get("difficulty_reduced_due_to_performance"):
             fundamentals = [t for t in remaining if t in self.FUNDAMENTAL_TOPICS]
             others = [t for t in remaining if t not in self.FUNDAMENTAL_TOPICS]
-            remaining = fundamentals + others
+            remaining = fundamentals + others if fundamentals else remaining
 
         return remaining[0]
     
@@ -364,6 +401,30 @@ class QuestionSelectorAgent:
         
         return "stable"
     
+    async def _generate_reengagement(
+            self,
+            state: InterviewState,
+            config: RunnableConfig
+    ) -> dict:
+        """Rephrases the current question when the candidate answered off-topic."""
+        original = state["current_question"]
+
+        response = await self.reengage_chain.ainvoke({
+            "original_question": original["text"],
+            "topic": original.get("topic", "general"),
+        }, config=config)
+
+        return {
+            "id": f"{original['id']}_reengage_{state.get('follow_up_count', 0) + 1}",
+            "text": response.strip(),
+            "question_type": "follow_up",
+            "topic": original.get("topic", "general"),
+            "difficulty": original.get("difficulty", "medium"),
+            "parent_question_id": original.get("parent_question_id") or original["id"],
+            "target_concepts": original.get("target_concepts", []),
+            "estimated_time_minutes": 3,
+        }
+
     async def _generate_follow_up(
             self,
             state: InterviewState,
@@ -371,6 +432,14 @@ class QuestionSelectorAgent:
     ) -> dict:
         eval_data = state["current_evaluation"]
         original = state["current_question"]
+
+        # Off-topic response: rephrase the question instead of probing missed points.
+        # Probing missed points for an off-topic response would directly reveal the answer.
+        covered = eval_data.get("key_points_covered", [])
+        score = eval_data["overall_score"]
+        if not bool(covered) or score < 3.0:
+            return await self._generate_reengagement(state, config)
+
         missed = eval_data.get("key_points_missed", [])[:2]
 
         response = await self.follow_up_chain.ainvoke(
@@ -385,10 +454,10 @@ class QuestionSelectorAgent:
             "id": f"{original['id']}_followup_{state.get('follow_up_count', 0) + 1}",
             "text": response.strip(),
             "question_type": "follow_up",
-            "topic": original.get("topic", "general"),  # Always inject topic
+            "topic": original.get("topic", "general"),
             "difficulty": original.get("difficulty", "medium"),
             "parent_question_id": original["id"],
-            "target_concepts": missed,  # Dynamic rubric for drift detection
+            "target_concepts": missed,
             "estimated_time_minutes": 3
         }
     

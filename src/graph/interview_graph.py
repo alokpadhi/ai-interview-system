@@ -13,7 +13,7 @@ from src.graph.state import InterviewState
 logger = get_logger(__name__)
 
 
-def _wrap_with_timeout(agent_fn, timeout_seconds: float = 15.0):
+def _wrap_with_timeout(agent_fn, timeout_seconds: float = 120.0):
     """Wrap an agent's execute method with asyncio.wait_for() timeout.
     TimeoutError is caught by the circuit breaker → fallback."""
     @functools.wraps(agent_fn)
@@ -23,7 +23,7 @@ def _wrap_with_timeout(agent_fn, timeout_seconds: float = 15.0):
         )
     return wrapped
 
-def build_start_graph(agents: AgentRegistry) -> CompiledStateGraph:
+def build_start_graph(agents: AgentRegistry, default_timeout: float = 120.0) -> CompiledStateGraph:
     """
     /start: Plan creation → first question retrieval.
     Supervisor only creates plan (no RAG dependency).
@@ -47,7 +47,8 @@ def build_start_graph(agents: AgentRegistry) -> CompiledStateGraph:
     return compiled_start_graph
 
 def build_interview_graph(agents: AgentRegistry, 
-                          checkpointer: BaseCheckpointSaver
+                          checkpointer: BaseCheckpointSaver,
+                          default_timeout: float = 120.0
     ) -> CompiledStateGraph:
     """
     Parallel execution with summarization as a checkpointed graph node.

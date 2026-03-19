@@ -50,22 +50,17 @@ class RefinedQuery(BaseModel):
     rationale: str = Field(description="one sentence explaining the change")
 
 _REFINE_PROMPT = ChatPromptTemplate.from_messages([
-    (
-        "system",
-        "You are refining a query for an ML interview question database."
-        "The previous query returned low-quality results."
-        "Produce a meaningfully different query - not just a rephrasing."
-    ),
-    (
-        "human",
-        """Original query: {original_query}
-        Grader feedback: {feedback}
-        Difficulty level: {difficulty}
-        Queries already tried (avoid these): {seen_queries}
-        
-        Return a new query that approaches the topic differently.
-        """
-    )
+    ("system",
+     "You are refining a search query for an ML interview question database. "
+     "The previous query returned low-quality results. "
+     "Produce a meaningfully different query — not just a rephrasing. "
+     "Return ONLY the refined query string. No explanation. No JSON. One line."),
+    ("human",
+     "Original query: {original_query}\n"
+     "Grader feedback: {feedback}\n"
+     "Difficulty level: {difficulty}\n"
+     "Queries already tried (avoid these): {seen_queries}\n\n"
+     "Return a new query that approaches the topic differently.")
 ])
 
 class QueryRefiner:

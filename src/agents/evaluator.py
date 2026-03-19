@@ -1,4 +1,5 @@
 import asyncio
+
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.output_parsers import JsonOutputParser
@@ -18,12 +19,11 @@ EVAL_COT_PROMPT = ChatPromptTemplate.from_messages([
     ("system", """You are a strict, impartial technical evaluator for AI/ML engineering interviews.
 Your evaluations must be grounded, consistent, and defensible. You do not reward confidence — only correctness and understanding.
 
-EVALUATION CONTEXT:
-Question: {question}
-Candidate Response: {response}
-
 RUBRIC CONTEXT:
 {rubric_context}
+
+If rubric_context contains target_concepts rather than a full rubric,
+evaluate completeness and accuracy against those concepts directly.
 
 ---
 
@@ -74,6 +74,8 @@ STEP 3 — MISCONCEPTION DETECTION
 A gap is something the candidate did not mention.
 A misconception is something the candidate stated INCORRECTLY — a wrong belief, not just missing knowledge.
 List only genuine misconceptions here. An incomplete answer is not a misconception.
+CRITICAL: If the candidate's response is off-topic (does not address the question asked), misconceptions MUST be an empty list.
+Do NOT flag incorrect statements from off-topic content — those are irrelevant to the question and must not be treated as misconceptions about it.
 
 STEP 4 — OVERALL SCORE
 Compute a weighted assessment: technical_accuracy (40%) + completeness (30%) + depth (20%) + clarity (10%).
@@ -86,43 +88,46 @@ Range: 0.0 to 10.0. One decimal place.
 CRITICAL CONSTRAINTS:
 - Never reward fluency over correctness. A clear wrong answer is worse than an unclear right one.
 - Never penalize for communication style if the technical content is sound.
-- If candidate_response is empty or off-topic, assign 0 across all criteria.
+- If candidate_response is empty or off-topic, assign 0 across ALL four criteria including
+  clarity. Clarity does not reward linguistic fluency when the content does not address the
+  question — a well-written irrelevant response is still 0 on every dimension.
 - Your evaluation_reasoning must be minimum 2 sentences and explain your overall_score specifically.
+- Sub-scores must be internally consistent. No single sub-score should differ from any other
+  by more than 4 points. Dimensions are correlated — high clarity with very low technical
+  accuracy or completeness is a contradiction. Calibrate all sub-scores before finalizing.
+- If overall_score < 5.0, key_points_missed MUST be non-empty. A low score with no missed
+  points is a contradiction — always identify what was missing or incorrect.
 """),
     ("human", """Evaluate the candidate's response now. Follow the protocol exactly.
+
 Question: {question}
 Response: {response}""")
 ])
 
 REFLECTION_PROMPT = ChatPromptTemplate.from_messages([
-(
-"system",
-"""
-You are reviewing an AI evaluation of a candidate's interview answer.
+    ("system", """You are reviewing an AI evaluation of a candidate's interview answer.
 
 Your job is NOT to re-evaluate the answer from scratch.
-
 Instead, verify that the evaluation is logically consistent and fair.
 
-Check for these issues:
+If the evaluation contains "is_fallback": true, return adjustment_needed: false immediately.
 
+Otherwise, check for these issues:
 1. Score inconsistency across dimensions.
 2. Overall score inconsistent with sub-scores.
 3. High score despite missing key concepts.
 4. Missed misconceptions in the candidate answer.
 5. Overly harsh or overly generous grading.
 
+score_adjustment must be a plain integer with NO leading + sign.
+Use 2 not +2, use -2 not -2.
+Use -1 or 1 for minor corrections. Reserve -2 or 2 only for clear systematic errors.
+
 If the evaluation is correct, return {{"adjustment_needed": false, "reason": "brief reason"}}.
-
 If issues exist, suggest corrected values.
-
 Be conservative — only adjust when clearly necessary.
-"""
-),
-(
-"human",
-"""
-Question:
+"""),
+    ("human", """Question:
 {question}
 
 Candidate Response:
@@ -135,16 +140,13 @@ Evaluation Produced:
 {evaluation}
 
 Return JSON with:
-
 {{
   "adjustment_needed": true | false,
   "reason": "short explanation",
-  "score_adjustment": -2 to +2,
+  "score_adjustment": integer between -2 and 2,
   "missed_misconceptions": [],
   "additional_key_points_missed": []
-}}
-"""
-)
+}}""")
 ])
 
 def build_eval_chain(complex_llm: BaseChatModel):
@@ -240,6 +242,56 @@ class EvaluatorAgent:
         """
         return _contains_code(response)
     
+    def _normalize_subscores(self, eval_dict: dict) -> dict:
+        """
+        Cap outlier sub-scores so the spread never exceeds the gate's MAX_SCORE_VARIANCE.
+        Called before validation so the gate never retries for this reason.
+
+        The LLM sometimes awards high clarity to off-topic responses even when all other
+        dimensions are 0. This corrects that without discarding the whole evaluation.
+
+        Algorithm: if spread > MAX_SPREAD, anchor to the median of all four scores
+        and cap any value that exceeds median ± MAX_SPREAD.
+        """
+        MAX_SPREAD = 6.0
+        SUB_SCORE_FIELDS = ["technical_accuracy", "completeness", "depth", "clarity"]
+
+        entries = []
+        for field in SUB_SCORE_FIELDS:
+            val = eval_dict.get(field)
+            if isinstance(val, dict) and "score" in val:
+                try:
+                    entries.append((field, float(val["score"])))
+                except (TypeError, ValueError):
+                    pass
+
+        if len(entries) < 2:
+            return eval_dict
+
+        values = [v for _, v in entries]
+        if max(values) - min(values) <= MAX_SPREAD:
+            return eval_dict
+
+        sorted_vals = sorted(values)
+        median = sorted_vals[len(sorted_vals) // 2]
+
+        # Use half the spread as the window on each side of the median.
+        # This guarantees the resulting spread ≤ MAX_SPREAD.
+        # Using ±MAX_SPREAD (full width) would allow outliers that are exactly
+        # at the boundary to remain, keeping the spread above MAX_SPREAD.
+        half = MAX_SPREAD / 2.0
+
+        for field, score in entries:
+            capped = round(max(0.0, min(10.0, max(median - half, min(median + half, score)))), 1)
+            if capped != score:
+                logger.warning(
+                    "Sub-score %s normalized %.1f → %.1f (spread was %.1f, median %.1f)",
+                    field, score, capped, max(values) - min(values), median
+                )
+                eval_dict[field]["score"] = capped
+
+        return eval_dict
+
     def _apply_reflection(self, eval_dict: dict, reflection: dict) -> dict:
         """
         Apply reflection adjustments to the evaluation dict in-place.
@@ -330,6 +382,11 @@ class EvaluatorAgent:
         # topic, question_id injection
         eval_dict["topic"] = question.get("topic", "general")
         eval_dict["question_id"] = question.get("id", "")
+
+        # Normalize sub-score spread before validation and reflection.
+        # Prevents retries caused by the LLM awarding an outlier score (e.g. high
+        # clarity on an off-topic response) despite the prompt constraint.
+        eval_dict = self._normalize_subscores(eval_dict)
 
         # code validation: if response have code block
         if self._response_contains_code(response):

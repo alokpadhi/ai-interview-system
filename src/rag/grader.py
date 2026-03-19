@@ -69,30 +69,24 @@ class GradingResult:
     penalised_score: Optional[float] = None
 
 _GRADING_PROMPT = ChatPromptTemplate.from_messages([
-    (
-        "system",
-        "You are evaluating whether retrieved interview questions are relevant "
-        "to the current retrieval context. Be strict - only grade HIGH if the "
-        "questions are clearly appropiate for the difficulty and topic."
-    ),
-    (
-        "human",
-        """Retrieval context:
-        - Difficulty: {difficulty}
-        - Topic Intent: {topic_intent}
-        - Interview stage: {stage}
-        
-        Retrieved documents (sample):
-        {doc_sample}
-        
-        Average relevance score from vector search: {avg_score:.3f}
-
-        Grade the overall retrieval quality as HIGH, MEDIUM, or LOW.
-        HIGH   = questions are on-topic and at the right difficulty
-        MEDIUM = mostly relevant but some mismatch
-        LOW    = off-topic or wrong difficulty throughout
-        """
-    ),
+    ("system",
+     "You are evaluating whether retrieved interview questions are relevant "
+     "to the current retrieval context. Be strict — only grade HIGH if the "
+     "questions are clearly appropriate for the difficulty and topic.\n\n"
+     "avg_score is cosine similarity (0 to 1). "
+     "Scores above 0.75 indicate strong semantic match. "
+     "Scores below 0.45 indicate weak match. Use this to inform your grade.\n\n"
+     "Return JSON: {{\"grade\": \"HIGH|MEDIUM|LOW\", \"feedback\": \"one sentence explanation\"}}"),
+    ("human",
+     "Retrieval context:\n"
+     "- Difficulty: {difficulty}\n"
+     "- Topic Intent: {topic_intent}\n\n"
+     "Retrieved documents (sample):\n{doc_sample}\n\n"
+     "Average relevance score from vector search: {avg_score:.3f}\n\n"
+     "Grade the overall retrieval quality as HIGH, MEDIUM, or LOW.\n"
+     "HIGH   = questions are on-topic and at the right difficulty\n"
+     "MEDIUM = mostly relevant but some mismatch\n"
+     "LOW    = off-topic or wrong difficulty throughout")
 ])
 
 # chain builder: with retry to fallback

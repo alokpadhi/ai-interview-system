@@ -2,6 +2,7 @@
 High level retrieval interface for RAG operations.
 Abstracts chromadb operations with agent-fiendly API.
 """
+import random
 
 from typing import List, Optional, Dict, Set
 from src.utils.logging_config import get_logger
@@ -63,19 +64,20 @@ class VectorRetriever:
                 topic=topic,
                 question_type=question_type
             )
-            
+            pool_size = min(n_result * 4, 20)
             # 2. Call self.vector_store.query() with collection="interview_questions"
             raw_results = self.vector_store.query(
                 collection_name="interview_questions",
                 query_text=query,
-                n_results=n_result,
+                n_results=pool_size,
                 where=where_clause
             )
             
             # 3. Format results using _format_results()
             # 4. Filter out exclude_ids (already done in _format_results)
             results = self._format_results(raw_results, exclude_ids=exclude_ids)
-            
+            logger.debug(f"Pool size before sampling: {len(results)} | topic={topic} | difficulty={difficulty}")
+            results = random.sample(results, min(n_result, len(results)))
             # 5. Log result count
             logger.info(f"Retrieved {len(results)} questions (after exclusions)")
             
@@ -182,8 +184,35 @@ class VectorRetriever:
             # Return empty list on error rather than crashing
             return []
     
+    # def _build_where_clause(
+    #     self,
+    #     difficulty: Optional[str] = None,
+    #     topic: Optional[str] = None,
+    #     question_type: Optional[str] = None,
+    #     category: Optional[str] = None,
+    #     language: Optional[str] = None
+    # ) -> Optional[Dict]:
+    #     """
+        
+            
+    #     Example:
+    #         _build_where_clause(difficulty="medium", topic="optimization")
+    #         → {"difficulty": "medium", "topic": "optimization"}
+    #     """
+    #     where_clause = {
+    #         "difficulty": difficulty,
+    #         "topic": topic,
+    #         "question_type": question_type,
+    #         "category": category,
+    #         "language": language
+    #     }
+
+    #     where_clause = {k:v for k, v in where_clause.items() if v is not None}
+
+    #     return where_clause or None
+
     def _build_where_clause(
-        self,
+            self,
         difficulty: Optional[str] = None,
         topic: Optional[str] = None,
         question_type: Optional[str] = None,
@@ -203,22 +232,27 @@ class VectorRetriever:
             
         Returns:
             Dictionary for ChromaDB where clause, or None if no filters
-            
-        Example:
-            _build_where_clause(difficulty="medium", topic="optimization")
-            → {"difficulty": "medium", "topic": "optimization"}
         """
-        where_clause = {
-            "difficulty": difficulty,
-            "topic": topic,
-            "question_type": question_type,
-            "category": category,
-            "language": language
-        }
+        
+        filters = []
+        
+        if difficulty:
+            filters.append({"difficulty": difficulty})
+        if topic:
+            filters.append({"topic": topic})
+        if question_type:
+            filters.append({"question_type": question_type})
+        if category:
+            filters.append({"category": category})
+        if language:
+            filters.append({"language": language})
 
-        where_clause = {k:v for k, v in where_clause.items() if v is not None}
-
-        return where_clause or None
+        if len(filters) == 0:
+            return None
+        elif len(filters) == 1:
+            return filters[0]
+        else:
+            return {"$and": filters}
     
     def _format_results(
         self,
@@ -341,3 +375,15 @@ class VectorRetriever:
         except Exception as e:
             logger.error(f"Failed to list collections: {e}")
             raise
+
+    def get_available_topics(self) -> list[str]:
+        """Fetch distinct topic values from ChromaDB interview_questions collection."""
+        results = self.vector_store.client.get_collection("interview_questions").get(
+            include=["metadatas"]
+        )
+        topics = list({
+            m["topic"] 
+            for m in results["metadatas"] 
+            if m.get("topic")
+        })
+        return sorted(topics)

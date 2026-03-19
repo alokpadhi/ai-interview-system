@@ -59,23 +59,28 @@ class PlanOutput(BaseModel):
 
 INTERVIEW_PLAN_PROMPT = ChatPromptTemplate.from_messages([
     ("system",
-        "You are an expert technical interviewer designing an AI/ML interview plan.\n\n"
-        "Rules:\n"
-        "- difficulty_curve must have exactly one entry per topic in topic_sequence\n"
-        "- Valid difficulty values: easy, medium, hard\n"
-        "- time_allocation must account for the full time budget across all topics\n"
-        "- Start with foundational topics before advanced ones\n"
-        "- focus_areas should reflect candidate's stated interests if provided\n"
-        "- difficulty_curve should progressively challenge the candidate"
-    ),
-     ("human", (
-         "Difficulty: {difficulty}\n"
-         "Focus topics: {focus_topics}\n"
-         "Time Budget: {time_budget} minutes\n"
-         "Target questions: {target_questions}"
-     ))
+     "You are an AI interview planner. Create a structured interview plan.\n"
+     "Return valid JSON with exactly these keys: "
+     "topic_sequence, difficulty_curve, time_allocation, focus_areas.\n\n"
+     "Rules:\n"
+     "- topic_sequence MUST only contain topics from the available_topics list. "
+     "Do not invent new topic names.\n"
+     "- difficulty_curve has ONE entry per topic (not per question). "
+     "Values must be exactly one of: \"easy\", \"medium\", \"hard\".\n"
+     "  Example: if topic_sequence is [\"transformers\", \"RAG\"], "
+     "difficulty_curve must be [\"medium\", \"hard\"]\n"
+     "- time_allocation must map each topic name to minutes as a flat dict. "
+     "Example: {{\"transformers\": 8, \"RAG\": 7}}. "
+     "Every topic in topic_sequence must have an entry. "
+     "Total must equal time_budget_minutes exactly.\n"
+     "- focus_areas is a list of strings describing key concepts to emphasize."),
+    ("human",
+     "Difficulty: {difficulty}\n"
+     "Focus topics: {focus_topics}\n"
+     "Time budget: {time_budget} minutes\n"
+     "Target questions: {target_questions}\n"
+     "Available topics: {available_topics}")
 ])
-
 def _build_plan_chain(complex_llm):
     return (INTERVIEW_PLAN_PROMPT
             | complex_llm.with_structured_output(PlanOutput)).with_retry(
@@ -101,12 +106,14 @@ class SupervisorAgent:
     """
     def __init__(self,
                  complex_llm: BaseChatModel,
-                 trend_analyzer: TrendAnalyzer):
+                 trend_analyzer: TrendAnalyzer,
+                 available_topics: list[str]):
         self.complex_llm = complex_llm
         self.trend_analyzer = trend_analyzer
         self.validation_gates = ValidationGateRegistry()
         self.circuit_breaker = CircuitBreaker(max_retries=1)
         self.plan_chain = _build_plan_chain(complex_llm)
+        self.available_topics = available_topics
 
     async def create_interview_plan(self, 
                               state: InterviewState, 
@@ -121,7 +128,8 @@ class SupervisorAgent:
             "difficulty": state["difficulty_level"],
             "focus_topics": state.get("focus_topics", []),
             "time_budget": state["time_budget_minutes"],
-            "target_questions": target_questions
+            "target_questions": target_questions,
+            "available_topics": self.available_topics,
         }, config=config)
 
         difficulty_level = plan.difficulty_curve[0]
@@ -146,6 +154,11 @@ class SupervisorAgent:
         Rule-based OODA with EMA authority and fallback protection.
         Supervisor is the SOLE owner of question_count — increments here.
         """
+        logger.info(f"DEBUG interview_plan: {state.get('interview_plan')}")
+        logger.info(f"DEBUG topic_sequence: {state.get('interview_plan', {}).get('topic_sequence')}")
+        logger.info(f"DEBUG question_count: {state['question_count']}")
+        logger.info(f"DEBUG target: {len(state.get('interview_plan', {}).get('topic_sequence', [10]))}")
+        
         self.circuit_breaker.reset()
         evaluation = state["current_evaluation"]
         is_fallback = evaluation.get("is_fallback", False)
@@ -229,13 +242,25 @@ class SupervisorAgent:
     def _decide_continuation(self,
                              analysis: Analysis,
                              state: InterviewState) -> tuple[bool, Optional[str]]:
+        # Time is the primary stopping condition.
         if analysis.time_critical:
             return False, "time_up"
-        
+
+        # Hard time check: stop if ≤ 2 minutes remain regardless of question count.
+        if analysis.time_pressure and analysis.questions_remaining <= 0:
+            return False, "time_up"
+
         target = len(state["interview_plan"]["topic_sequence"])
-        if state["question_count"] + 1 >= target:
+
+        # Soft question limit: only stop if time is also running low (< 5 min).
+        # If time is available, keep going — the plan is a guide, not a hard cap.
+        if state["question_count"] + 1 >= target and analysis.time_pressure:
             return False, "completed"
-        
+
+        # Hard ceiling: prevent runaway sessions (2× the planned question count).
+        if state["question_count"] + 1 >= target * 2:
+            return False, "completed"
+
         return True, None
     
     def _resolve_difficulty(self,
