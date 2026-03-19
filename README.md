@@ -4,6 +4,10 @@ A production-grade, multi-agent AI system that conducts fully adaptive technical
 
 ---
 
+[Demo Video](https://drive.google.com/file/d/1uE3e3s0Ywb2He_O55D3IMpyWjvqh1LAn/view?usp=share_link)
+
+---
+
 ## Table of Contents
 
 - [Overview](#overview)
@@ -39,36 +43,13 @@ The AI Interview System conducts adaptive technical interviews across AI/ML topi
 
 ## System Architecture
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                     API LAYER (FastAPI)                  │
-│  POST /start  │  POST /submit_response  │  DELETE /end   │
-│  POST /submit_response/stream (SSE)                      │
-└─────────────────────┬───────────────────────────────────┘
-                      │
-┌─────────────────────▼───────────────────────────────────┐
-│              ORCHESTRATION (LangGraph)                   │
-│                                                          │
-│   START → Evaluator → ┌─ Feedback Agent    ─┐           │
-│                        │                    ├→ Supervisor → MaybeSummarize → END
-│                        └─ Question Selector ─┘           │
-│                                                          │
-│   Supervisor: OODA loop, EMA difficulty authority        │
-│   Fan-out/Fan-in: Parallel execution, no state conflicts │
-└─────────────────────┬───────────────────────────────────┘
-                      │
-┌─────────────────────▼───────────────────────────────────┐
-│                  AGENTIC RAG (CRAG)                      │
-│  ChromaDB Retrieval → Document Grader → Grade Check      │
-│  LOW grade → Query Refiner → Retry (max 2 attempts)      │
-└─────────────────────┬───────────────────────────────────┘
-                      │
-┌─────────────────────▼───────────────────────────────────┐
-│                    DATA LAYER                            │
-│  ChromaDB (questions, concepts, code solutions)          │
-│  SQLite (sessions, evaluations, agent traces)            │
-└─────────────────────────────────────────────────────────┘
-```
+
+
+### Overview
+![Architecture Overview Diagram](https://github.com/alokpadhi/ai-interview-system/blob/main/assets/overview.png)
+
+### Detailed Architecture
+![Detailed Architecture Diagram](https://github.com/alokpadhi/ai-interview-system/blob/main/assets/detailed_architecture.png)
 
 ### Dual-Model Strategy
 
