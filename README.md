@@ -1,8 +1,6 @@
-# Multi-Agent AI Interview System
+# AI Interview System
 
 A production-grade, multi-agent AI system that conducts fully adaptive technical interviews end-to-end. Built to demonstrate senior-level AI/ML engineering — not a chatbot wrapper, but a system designed with the same rigor you'd apply at scale.
-
-[Demo Video](https://drive.google.com/file/d/1uE3e3s0Ywb2He_O55D3IMpyWjvqh1LAn/view?usp=sharing)
 
 ---
 
@@ -41,12 +39,36 @@ The AI Interview System conducts adaptive technical interviews across AI/ML topi
 
 ## System Architecture
 
-
-### Overview
-![Architecture Overview](https://github.com/alokpadhi/ai-interview-system/blob/main/assets/overview.png)
-
-### Detailed Architecture
-![Detailed Architecture](https://github.com/alokpadhi/ai-interview-system/blob/main/assets/detailed_architecture.png)
+```
+┌─────────────────────────────────────────────────────────┐
+│                     API LAYER (FastAPI)                  │
+│  POST /start  │  POST /submit_response  │  DELETE /end   │
+│  POST /submit_response/stream (SSE)                      │
+└─────────────────────┬───────────────────────────────────┘
+                      │
+┌─────────────────────▼───────────────────────────────────┐
+│              ORCHESTRATION (LangGraph)                   │
+│                                                          │
+│   START → Evaluator → ┌─ Feedback Agent    ─┐           │
+│                        │                    ├→ Supervisor → MaybeSummarize → END
+│                        └─ Question Selector ─┘           │
+│                                                          │
+│   Supervisor: OODA loop, EMA difficulty authority        │
+│   Fan-out/Fan-in: Parallel execution, no state conflicts │
+└─────────────────────┬───────────────────────────────────┘
+                      │
+┌─────────────────────▼───────────────────────────────────┐
+│                  AGENTIC RAG (CRAG)                      │
+│  ChromaDB Retrieval → Document Grader → Grade Check      │
+│  LOW grade → Query Refiner → Retry (max 2 attempts)      │
+└─────────────────────┬───────────────────────────────────┘
+                      │
+┌─────────────────────▼───────────────────────────────────┐
+│                    DATA LAYER                            │
+│  ChromaDB (questions, concepts, code solutions)          │
+│  SQLite (sessions, evaluations, agent traces)            │
+└─────────────────────────────────────────────────────────┘
+```
 
 ### Dual-Model Strategy
 
@@ -493,15 +515,31 @@ Fetch available interview topics.
 | `estimated_time_minutes` defaults to 5.0 | Time-aware filtering inactive until `scripts/add_time_metadata.py` is run |
 | Shared follow-up/clarify ceiling | `MAX_FOLLOW_UPS=2` is a hard cap across both follow-up and clarify modes. If a follow-up and clarify both occur on the same question, the next clarification hits the ceiling and forces a new question regardless of whether the misconception was resolved. Separate per-mode counters would be more precise |
 
-### Planned Improvements
+### Technical Improvements
 
-- **Resilience patterns** — `.with_retry()`, `.with_fallbacks()`, `asyncio.wait_for()` timeouts on all agent chains
-- **Observability** — LangSmith tracing, Prometheus metrics, structured logging to SQLite `agent_traces`
-- **Evaluation framework** — end-to-end LLM judge evaluation, per-agent unit test suite
-- **Docker deployment** — `docker-compose.yml` with API + frontend + Ollama services
-- **React frontend** — real-time SSE token streaming, richer interview UX
-- **Multi-domain support** — SDE backend, SDE frontend, system design, leadership domains
-- **Redis session store** — enables horizontal scaling across multiple API workers
+- **PostgreSQL migration** — replace SQLite with PostgreSQL for both the relational database and LangGraph checkpointer (`AsyncPostgresSaver`). SQLite's single-writer lock becomes a bottleneck under concurrent interviews. PostgreSQL solves write contention and enables horizontal scaling
+- **Production vector database** — replace ChromaDB with Qdrant (self-hosted, strong metadata filtering) or Pinecone (managed, zero ops). ChromaDB is single-node with no replication. The `VectorRetriever` abstraction makes this a swap at the infrastructure layer with no agent code changes
+- **Redis session store** — replace in-memory `session_store` dict with Redis. Current implementation does not survive server restart and cannot scale across multiple API workers
+- **Authentication** — JWT/OAuth2 authentication layer. Current `user_id` is a server-generated UUID with no identity verification — a prerequisite for candidate history and abuse prevention
+- **Observability** — LangSmith tracing for full agent/LLM/RAG trace visibility, Prometheus metrics (latency per agent, cache hit rate, EMA difficulty trends, token usage), structured logging to SQLite `agent_traces` table
+- **React frontend** — replace Streamlit with a React/Next.js frontend for true SSE token streaming. Streamlit's full-page rerender model prevents character-by-character feedback display
+- **Async evaluation pipeline** — decouple evaluation from the HTTP response. Return feedback from a fast model immediately, run deep CoT evaluation asynchronously, update performance trajectory in background. Reduces perceived latency significantly
+- **Prompt versioning + A/B testing** — prompts are currently static YAML files with no versioning. Production requires variant tracking, quality metrics per prompt version, and rollback capability — standard MLOps practice for LLM systems
+- **Fine-tuning** — fine-tune the 7B model on domain-specific evaluation and feedback generation tasks using collected interview data. Reduces reliance on prompt engineering for structured output compliance
+- **Evaluation framework** — end-to-end LLM judge evaluation suite, per-agent unit tests, regression testing against known question/answer pairs
+- **Docker deployment** — `docker-compose.yml` with API + frontend + Ollama + PostgreSQL services for one-command local setup and reproducible deployments
+- **Per-mode follow-up counters** — separate `follow_up_count` and `clarify_count` to prevent the shared `MAX_FOLLOW_UPS=2` ceiling from cutting clarification short when a follow-up has already been asked
+
+---
+
+### Feature Improvements
+
+- **Multi-domain scaling** — current system depends on a curated dataset scoped to AI/ML (700 questions, 125 concepts). Scaling to SDE backend, system design, or leadership requires a synthetic data generation pipeline: domain spec → LLM question generator → rubric validator → human review gate → ChromaDB ingestion. Alternatively, dynamic first-principles question generation at retrieval time for domains with sparse coverage
+- **Candidate history + longitudinal tracking** — each interview is currently stateless from the user's perspective. Storing performance history per candidate enables trend tracking across sessions, topic recommendation based on past weaknesses, and personalized difficulty seeding
+- **Question quality feedback loop** — no mechanism exists to retire low-quality questions or calibrate difficulty based on actual pass rates. A question that 80% of candidates answer correctly is not `hard` regardless of its tag. Empirical difficulty calibration from response data would make difficulty curves more reliable
+- **Auto difficulty calibration** — extend the feedback loop to continuously recalibrate question difficulty tags based on aggregate candidate performance. Makes the EMA difficulty adaptation more accurate over time
+- **Admin interface** — no operational tooling exists for managing questions, reviewing flagged evaluations (`needs_human_review=True`), or viewing system-wide analytics. A basic admin API is the minimum for operating this in production
+- **JD and resume-aware interviews** — currently focus topics are manually selected. Parsing a job description would auto-configure `focus_topics` and difficulty weighting based on what the role actually requires. Parsing the candidate's resume would seed the difficulty curve based on claimed experience, skip questions below their stated level, and prioritize gaps between resume skills and JD requirements — replicating how a prepared human interviewer would approach the session
 
 ---
 
