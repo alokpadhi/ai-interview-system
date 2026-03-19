@@ -2,7 +2,7 @@
 
 A production-grade, multi-agent AI system that conducts fully adaptive technical interviews end-to-end. Built to demonstrate senior-level AI/ML engineering — not a chatbot wrapper, but a system designed with the same rigor you'd apply at scale.
 
-[Demo Video](https://raw.githubusercontent.com/alokpadhi/repo/main/image.png)
+[Demo Video](https://drive.google.com/file/d/1uE3e3s0Ywb2He_O55D3IMpyWjvqh1LAn/view?usp=sharing)
 
 ---
 
@@ -43,10 +43,10 @@ The AI Interview System conducts adaptive technical interviews across AI/ML topi
 
 
 ### Overview
-![Architecture Overview](https://drive.google.com/uc?export=view&id=13_PjYhxV1xlWO2dwUF9WHV640kWsJaIZ)
+![Architecture Overview](https://github.com/alokpadhi/ai-interview-system/blob/main/assets/overview.png)
 
 ### Detailed Architecture
-![Detailed Architecture](https://drive.google.com/uc?export=view&id=13_PjYhxV1xlWO2dwUF9WHV640kWsJaIZ)
+![Detailed Architecture](https://github.com/alokpadhi/ai-interview-system/blob/main/assets/detailed_architecture.png)
 
 ### Dual-Model Strategy
 
