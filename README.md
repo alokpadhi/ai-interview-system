@@ -2,10 +2,9 @@
 
 A production-grade, multi-agent AI system that conducts fully adaptive technical interviews end-to-end. Built to demonstrate senior-level AI/ML engineering — not a chatbot wrapper, but a system designed with the same rigor you'd apply at scale.
 
-![Python](https://img.shields.io/badge/python-3.11+-blue)
-![LangGraph](https://img.shields.io/badge/LangGraph-1.0+-purple)
-![License](https://img.shields.io/badge/license-MIT%20%2B%20Commons%20Clause-green)
-![uv](https://img.shields.io/badge/package%20manager-uv-orange)
+![Python](https://img.shields.io/badge/python-3.11+-blue?logo=python&logoColor=white) ![LangChain](https://img.shields.io/badge/LangChain-1.2+-1C3C3C?logo=langchain&logoColor=white) ![LangGraph](https://img.shields.io/badge/LangGraph-1.0+-1C3C3C?logo=langchain&logoColor=white) ![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-009688?logo=fastapi&logoColor=white)
+
+![ChromaDB](https://img.shields.io/badge/ChromaDB-vector%20store-orange) ![Ollama](https://img.shields.io/badge/Ollama-local%20LLM-black?logo=ollama&logoColor=white) ![Streamlit](https://img.shields.io/badge/Streamlit-frontend-FF4B4B?logo=streamlit&logoColor=white) ![uv](https://img.shields.io/badge/uv-package%20manager-DE5FE9?logo=uv&logoColor=white) ![License](https://img.shields.io/badge/license-MIT%20%2B%20Commons%20Clause-green)
 
 ---
 
