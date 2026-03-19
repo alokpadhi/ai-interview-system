@@ -86,6 +86,7 @@ async def lifespan(app: FastAPI):
 
     async with AsyncSqliteSaver.from_conn_string(
         settings.checkpoint_db) as checkpointer:
+        app.state.available_topics = available_topics
         app.state.rag_service = rag_service
         app.state.start_graph = build_start_graph(agents=agents)
         app.state.interview_graph = build_interview_graph(agents=agents,

@@ -154,6 +154,11 @@ class SupervisorAgent:
         Rule-based OODA with EMA authority and fallback protection.
         Supervisor is the SOLE owner of question_count — increments here.
         """
+        logger.info(f"DEBUG interview_plan: {state.get('interview_plan')}")
+        logger.info(f"DEBUG topic_sequence: {state.get('interview_plan', {}).get('topic_sequence')}")
+        logger.info(f"DEBUG question_count: {state['question_count']}")
+        logger.info(f"DEBUG target: {len(state.get('interview_plan', {}).get('topic_sequence', [10]))}")
+        
         self.circuit_breaker.reset()
         evaluation = state["current_evaluation"]
         is_fallback = evaluation.get("is_fallback", False)
@@ -237,13 +242,25 @@ class SupervisorAgent:
     def _decide_continuation(self,
                              analysis: Analysis,
                              state: InterviewState) -> tuple[bool, Optional[str]]:
+        # Time is the primary stopping condition.
         if analysis.time_critical:
             return False, "time_up"
-        
+
+        # Hard time check: stop if ≤ 2 minutes remain regardless of question count.
+        if analysis.time_pressure and analysis.questions_remaining <= 0:
+            return False, "time_up"
+
         target = len(state["interview_plan"]["topic_sequence"])
-        if state["question_count"] + 1 >= target:
+
+        # Soft question limit: only stop if time is also running low (< 5 min).
+        # If time is available, keep going — the plan is a guide, not a hard cap.
+        if state["question_count"] + 1 >= target and analysis.time_pressure:
             return False, "completed"
-        
+
+        # Hard ceiling: prevent runaway sessions (2× the planned question count).
+        if state["question_count"] + 1 >= target * 2:
+            return False, "completed"
+
         return True, None
     
     def _resolve_difficulty(self,

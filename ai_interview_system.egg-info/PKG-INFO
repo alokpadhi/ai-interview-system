@@ -6,6 +6,7 @@ Requires-Python: >=3.11
 Description-Content-Type: text/markdown
 Requires-Dist: chromadb>=1.4.1
 Requires-Dist: fastapi>=0.128.0
+Requires-Dist: httpx>=0.28.1
 Requires-Dist: langchain>=1.2.4
 Requires-Dist: langchain-anthropic>=1.3.1
 Requires-Dist: langchain-community>=0.4.1
@@ -18,6 +19,7 @@ Requires-Dist: pydantic>=2.12.5
 Requires-Dist: pymupdf>=1.26.7
 Requires-Dist: pyyaml>=6.0.3
 Requires-Dist: sentence-transformers>=5.2.0
+Requires-Dist: streamlit>=1.55.0
 Requires-Dist: torch>=2.9.1
 Requires-Dist: tqdm>=4.67.1
 Requires-Dist: transformers>=4.57.5

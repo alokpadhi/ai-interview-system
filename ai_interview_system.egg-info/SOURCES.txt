@@ -13,6 +13,12 @@ src/agents/feedback.py
 src/agents/question_selector.py
 src/agents/supervisor.py
 src/api/__init__.py
+src/api/main.py
+src/api/models.py
+src/api/report.py
+src/api/routes.py
+src/api/session.py
+src/api/state.py
 src/data/__init__.py
 src/data/database.py
 src/data/embeddings.py

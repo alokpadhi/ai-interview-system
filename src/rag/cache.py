@@ -123,6 +123,7 @@ class ConceptEntry:
 
 
 # observability
+@dataclass
 class CacheMetrics:
     """Obersvability counters for the cache store."""
     total_requests: int = 0
@@ -181,7 +182,7 @@ class InterviewCacheStore:
 
         # locking
         self._session_locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
-        self._gloabl_lock = asyncio.Lock()
+        self._global_lock = asyncio.Lock()
 
         # observability
         self.metrics = CacheMetrics()
@@ -273,20 +274,23 @@ class InterviewCacheStore:
             session_id: str,
             topic: str,
             difficulty: str,
-            selector_fn: Callable[[List[RetrievalResult]], Awaitable[RetrievalResult]],
-    ) -> Optional[RetrievalResult]:
+            selector_fn: Callable[[List[RetrievalResult]], Awaitable[Dict]],
+    ) -> Optional[Dict]:
         """Atomically select a question and mark it as used.
         Runs selector_fn inside the session lock so no TOCTOU race:
         another coroutine can't grab the same question between get and mark.
+
+        selector_fn receives List[RetrievalResult] from the cache and must
+        return a flat question dict (via to_question_dict()).
         
-        Returns none if cache miss (caller should CRAG then retry).
+        Returns None if cache miss (caller should CRAG then retry).
         """
         key = f"{topic}:{difficulty}"
         async with self._session_locks[session_id]:
             pool = self._topic_cache.get(session_id, OrderedDict())
             entry = pool.get(key)
 
-            if entry is None or entry.is_expired() or entry.is_reusable():
+            if entry is None or entry.is_expired() or not entry.is_reusable():
                 return None
             
             available = entry.get_unused(set())
@@ -295,7 +299,7 @@ class InterviewCacheStore:
                 return None
             
             selected = await selector_fn(available)
-            entry.mark_used([selected.id])
+            entry.mark_used([selected["id"]])
             entry.touch()
             pool.move_to_end(key)
             return selected
@@ -354,7 +358,7 @@ class InterviewCacheStore:
         return total entries removed.
         """
         removed = 0
-        async with self._gloabl_lock:
+        async with self._global_lock:
             if session_id in self._topic_cache:
                 removed += len(self._topic_cache.pop(session_id))
 
@@ -410,19 +414,18 @@ class InterviewCacheStore:
         """
         for topic in topics:
             try:
-                result = await rag_service.retrieve(
+                result = await rag_service.retrieve_batch(
                     topic=topic,
                     difficulty=difficulty,
-                    exclude_ids=[],
                     n_results=5,
                 )
 
-                if result.documents:
+                if result.candidates:
                     await self.set_topic_questions(
                         session_id=session_id,
                         topic=topic,
                         difficulty=difficulty,
-                        questions=result.documents,
+                        questions=result.candidates,
                         crag_grade=result.grade,
                     )
                     logger.debug(

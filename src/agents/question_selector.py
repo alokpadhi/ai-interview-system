@@ -270,9 +270,15 @@ class QuestionSelectorAgent:
         session_id = state["interview_id"]
 
         # atomic select + mark: eliminates TOCTOU race
-        async def _select_fn(candidates: list[dict]) -> dict:
-            return await self._react_select(candidates, state, config)
-        
+        # NOTE: selector_fn receives RetrievalResult objects from the cache;
+        # convert to dicts for _react_select, then return the chosen dict.
+        async def _select_fn(candidates: list) -> dict:
+            candidate_dicts = [
+                c.to_question_dict() if hasattr(c, "to_question_dict") else c
+                for c in candidates
+            ]
+            return await self._react_select(candidate_dicts, state, config)
+
         selected = await self.cache_store.select_and_mark(
             session_id=session_id,
             topic=topic,
@@ -281,7 +287,7 @@ class QuestionSelectorAgent:
         )
 
         if selected is None:
-            # cache missed - retrive via crag
+            # cache missed - retrieve via crag
             crag_result = await self.rag.retrieve_with_crag(
                 topic=topic,
                 difficulty=difficulty,
@@ -289,11 +295,14 @@ class QuestionSelectorAgent:
                 remaining_time=remaining_time
             )
 
+            # Store RetrievalResult objects (not dicts) so CacheEntry.get_unused()
+            # can access .id as an attribute. to_question_dict() is called later
+            # inside _select_fn or at the fallback path.
             await self.cache_store.set_topic_questions(
                 session_id=session_id,
                 topic=topic,
                 difficulty=difficulty,
-                questions=[c.to_question_dict() for c in crag_result.candidates],
+                questions=crag_result.candidates,
                 crag_grade=crag_result.grade
             )
 

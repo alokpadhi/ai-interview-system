@@ -2,7 +2,6 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 class StartRequest(BaseModel):
-    user_id: str = Field(description="The user id")
     time_budget_minutes: int = Field(description="total time allocated for the interview", 
                                      default=30)
     difficulty: Literal["easy", "medium", "hard"] = Field(description="initial dificulty level", 
@@ -16,6 +15,7 @@ class QuestionInfo(BaseModel):
     estimated_time_minutes: float
 
 class StartResponse(BaseModel):
+    user_id: str
     session_id: str
     question: QuestionInfo
     time_budget_minutes: int

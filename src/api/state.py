@@ -14,6 +14,7 @@ class AppState:
     interview_graph: CompiledStateGraph
     cache_store: InterviewCacheStore
     rag_service: AgenticRAGService
+    available_topics: list[str]
     session_store: dict[str, SessionMeta]
 
 class InterviewApp(FastAPI):
