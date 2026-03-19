@@ -535,3 +535,9 @@ Every design decision reflects production engineering discipline:
 - **Trust the structure, not the prompt** — Pydantic contracts + gates enforce correctness; prompts guide but cannot guarantee
 - **Latency is a feature** — dual-model strategy, background pre-warming, and topic-aware caching exist because 10s feedback loops break the interview experience
 - **No early termination** — reducing difficulty and weighting the final score is more honest than stopping early
+
+## License
+
+Copyright (c) 2026 Alok Padhi. Source available under 
+[MIT + Commons Clause](LICENSE) — free for personal and 
+educational use, commercial use restricted.
