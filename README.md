@@ -41,36 +41,12 @@ The AI Interview System conducts adaptive technical interviews across AI/ML topi
 
 ## System Architecture
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                     API LAYER (FastAPI)                  │
-│  POST /start  │  POST /submit_response  │  DELETE /end   │
-│  POST /submit_response/stream (SSE)                      │
-└─────────────────────┬───────────────────────────────────┘
-                      │
-┌─────────────────────▼───────────────────────────────────┐
-│              ORCHESTRATION (LangGraph)                   │
-│                                                          │
-│   START → Evaluator → ┌─ Feedback Agent    ─┐           │
-│                        │                    ├→ Supervisor → MaybeSummarize → END
-│                        └─ Question Selector ─┘           │
-│                                                          │
-│   Supervisor: OODA loop, EMA difficulty authority        │
-│   Fan-out/Fan-in: Parallel execution, no state conflicts │
-└─────────────────────┬───────────────────────────────────┘
-                      │
-┌─────────────────────▼───────────────────────────────────┐
-│                  AGENTIC RAG (CRAG)                      │
-│  ChromaDB Retrieval → Document Grader → Grade Check      │
-│  LOW grade → Query Refiner → Retry (max 2 attempts)      │
-└─────────────────────┬───────────────────────────────────┘
-                      │
-┌─────────────────────▼───────────────────────────────────┐
-│                    DATA LAYER                            │
-│  ChromaDB (questions, concepts, code solutions)          │
-│  SQLite (sessions, evaluations, agent traces)            │
-└─────────────────────────────────────────────────────────┘
-```
+
+### Overview
+![Architecture Overview](https://drive.google.com/uc?export=view&id=13_PjYhxV1xlWO2dwUF9WHV640kWsJaIZ)
+
+### Detailed Architecture
+![Detailed Architecture](https://drive.google.com/uc?export=view&id=13_PjYhxV1xlWO2dwUF9WHV640kWsJaIZ)
 
 ### Dual-Model Strategy
 
