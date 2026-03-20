@@ -1,3 +1,4 @@
+LICENSE
 README.md
 pyproject.toml
 ai_interview_system.egg-info/PKG-INFO
@@ -45,6 +46,7 @@ src/tools/code_validator.py
 src/tools/concept_lookup.py
 src/tools/rubric_tool.py
 src/ui/__init__.py
+src/ui/app.py
 src/utils/__init__.py
 src/utils/config.py
 src/utils/llm_factory.py

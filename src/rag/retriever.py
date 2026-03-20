@@ -375,15 +375,25 @@ class VectorRetriever:
         except Exception as e:
             logger.error(f"Failed to list collections: {e}")
             raise
-
-    def get_available_topics(self) -> list[str]:
-        """Fetch distinct topic values from ChromaDB interview_questions collection."""
+    
+    def get_available_topics(self, min_questions: int = 3) -> list[str]:
+        """
+        Return topics that have sufficient question coverage.
+        Topics with fewer than min_questions are excluded —
+        they would cause CRAG exhaustion and fallback questions.
+        """
         results = self.vector_store.client.get_collection("interview_questions").get(
-            include=["metadatas"]
-        )
-        topics = list({
-            m["topic"] 
-            for m in results["metadatas"] 
-            if m.get("topic")
-        })
-        return sorted(topics)
+            include=["metadatas"])
+        
+        # count questions per topic
+        topic_counts = {}
+        for metadata in results["metadatas"]:
+            topic = metadata.get("topic")
+            if topic:
+                topic_counts[topic] = topic_counts.get(topic, 0) + 1
+        
+        # only return topics with sufficient coverage
+        return [
+            topic for topic, count in topic_counts.items()
+            if count >= min_questions
+        ]
