@@ -341,7 +341,7 @@ flowchart TD
     class RWC,RB entry
 ```
 
-[Detailed Version](https://github.com/alokpadhi/ai-interview-system/blob/main/assets/multi_agent_architecture.md)
+**[Detailed Version](https://github.com/alokpadhi/ai-interview-system/blob/main/assets/multi_agent_architecture.md)**
 
 ### Dual-Model Strategy
 
