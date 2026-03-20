@@ -54,7 +54,7 @@ The AI Interview System conducts adaptive technical interviews across AI/ML topi
 
 
 ### Overview
-![Architecture Overview](https://github.com/alokpadhi/ai-interview-system/blob/main/assets/overview.png)
+![Architecture Overview](https://raw.githubusercontent.com/alokpadhi/ai-interview-system/refs/heads/main/assets/multi_agent_architecture.md)
 
 ### Detailed Architecture
 ![Architecture Diagram](https://github.com/alokpadhi/ai-interview-system/blob/main/assets/multi_agent_architecture.md)
