@@ -58,7 +58,6 @@ The AI Interview System conducts adaptive technical interviews across AI/ML topi
 
 ### Detailed Architecture
 ```mermaid
-...Simplified Version...
 flowchart TD
     %% ─────────────────────────────────────────────
     %% LAYER 1 — CLIENT
