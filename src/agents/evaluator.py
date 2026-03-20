@@ -241,21 +241,34 @@ class EvaluatorAgent:
         — no duplication.
         """
         return _contains_code(response)
-    
+
     def _normalize_subscores(self, eval_dict: dict) -> dict:
         """
         Cap outlier sub-scores so the spread never exceeds the gate's MAX_SCORE_VARIANCE.
-        Called before validation so the gate never retries for this reason.
+        Also aligns overall_score to within MAX_OVERALL_DRIFT of the sub-score average.
+        Called before validation so the gate never retries for these reasons.
 
         The LLM sometimes awards high clarity to off-topic responses even when all other
-        dimensions are 0. This corrects that without discarding the whole evaluation.
+        dimensions are 0. It also sometimes assigns an overall_score misaligned with
+        sub-scores (e.g. overall=2.0 when all sub-scores are 0).
 
-        Algorithm: if spread > MAX_SPREAD, anchor to the median of all four scores
-        and cap any value that exceeds median ± MAX_SPREAD.
+        Algorithm:
+        1. Standard spread check: if spread > MAX_SPREAD, anchor to median and cap
+        outliers to median ± MAX_SPREAD/2. Guarantees spread ≤ MAX_SPREAD.
+        2. Low-score consistency check: when sub_avg < LOW_SCORE_THRESHOLD (2.0),
+        tighten the spread ceiling to LOW_SCORE_MAX_SPREAD (1.0). A clarity score
+        of 2 when everything else is 0 is a LLM error — linguistic fluency should
+        not be rewarded when content has no value.
+        3. Overall alignment: if |overall_score - sub_avg| > MAX_OVERALL_DRIFT (1.5),
+        clamp overall_score to sub_avg ± MAX_OVERALL_DRIFT.
         """
         MAX_SPREAD = 6.0
+        LOW_SCORE_THRESHOLD = 2.0
+        LOW_SCORE_MAX_SPREAD = 1.0
+        MAX_OVERALL_DRIFT = 1.5
         SUB_SCORE_FIELDS = ["technical_accuracy", "completeness", "depth", "clarity"]
 
+        # normalize sub-score spread
         entries = []
         for field in SUB_SCORE_FIELDS:
             val = eval_dict.get(field)
@@ -265,30 +278,73 @@ class EvaluatorAgent:
                 except (TypeError, ValueError):
                     pass
 
-        if len(entries) < 2:
-            return eval_dict
+        if len(entries) >= 2:
+            values = [v for _, v in entries]
+            sub_avg = sum(values) / len(values)
+            spread = max(values) - min(values)
 
-        values = [v for _, v in entries]
-        if max(values) - min(values) <= MAX_SPREAD:
-            return eval_dict
+            # Standard spread check
+            exceeds_spread = spread > MAX_SPREAD
 
-        sorted_vals = sorted(values)
-        median = sorted_vals[len(sorted_vals) // 2]
+            # Low-score consistency check — tighter threshold when avg < 2.0
+            # A spread of 2 at [8,8,8,10] is fine; at [0,0,0,2] it's a LLM error
+            exceeds_low_score_spread = (
+                sub_avg < LOW_SCORE_THRESHOLD and spread > LOW_SCORE_MAX_SPREAD
+            )
 
-        # Use half the spread as the window on each side of the median.
-        # This guarantees the resulting spread ≤ MAX_SPREAD.
-        # Using ±MAX_SPREAD (full width) would allow outliers that are exactly
-        # at the boundary to remain, keeping the spread above MAX_SPREAD.
-        half = MAX_SPREAD / 2.0
-
-        for field, score in entries:
-            capped = round(max(0.0, min(10.0, max(median - half, min(median + half, score)))), 1)
-            if capped != score:
-                logger.warning(
-                    "Sub-score %s normalized %.1f → %.1f (spread was %.1f, median %.1f)",
-                    field, score, capped, max(values) - min(values), median
+            if exceeds_spread or exceeds_low_score_spread:
+                sorted_vals = sorted(values)
+                median = sorted_vals[len(sorted_vals) // 2]
+                half = (
+                    MAX_SPREAD / 2.0
+                    if exceeds_spread
+                    else LOW_SCORE_MAX_SPREAD / 2.0
                 )
-                eval_dict[field]["score"] = capped
+
+                for field, score in entries:
+                    capped = round(
+                        max(0.0, min(10.0,
+                            max(median - half, min(median + half, score)))),
+                        1
+                    )
+                    if capped != score:
+                        logger.warning(
+                            "Sub-score %s normalized %.1f → %.1f "
+                            "(spread=%.1f, sub_avg=%.1f, median=%.1f)",
+                            field, score, capped, spread, sub_avg, median
+                        )
+                        eval_dict[field]["score"] = capped
+
+        # align overall_score to sub-score average
+        # Re-read entries after step 1+2 normalization
+        sub_scores = []
+        for field in SUB_SCORE_FIELDS:
+            val = eval_dict.get(field)
+            if isinstance(val, dict) and "score" in val:
+                try:
+                    sub_scores.append(float(val["score"]))
+                except (TypeError, ValueError):
+                    pass
+
+        if sub_scores:
+            sub_avg = sum(sub_scores) / len(sub_scores)
+            try:
+                overall = float(eval_dict.get("overall_score", sub_avg))
+            except (TypeError, ValueError):
+                overall = sub_avg
+
+            if abs(overall - sub_avg) > MAX_OVERALL_DRIFT:
+                clamped = round(
+                    max(sub_avg - MAX_OVERALL_DRIFT,
+                        min(sub_avg + MAX_OVERALL_DRIFT, overall)),
+                    1
+                )
+                logger.warning(
+                    "overall_score misaligned — normalized %.1f → %.1f "
+                    "(sub_avg=%.1f, drift=%.1f)",
+                    overall, clamped, sub_avg, abs(overall - sub_avg)
+                )
+                eval_dict["overall_score"] = clamped
 
         return eval_dict
 

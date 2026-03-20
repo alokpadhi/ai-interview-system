@@ -34,6 +34,7 @@ class TrendAnalyzer:
     MIN_TRAJECTORY_LENGTH = 4
     EMA_WINDOW = 4
     INCREASE_THRESHOLD = 7.5
+    HIGH_STABLE_THRESHOLD = 8.0  # stable but excellent → still increase difficulty
     DECREASE_THRESHOLD = 5.0
     TREND_CHANGE_THRESHOLD = 0.8
     NEUTRAL_EMA = 5.0
@@ -106,19 +107,21 @@ class TrendAnalyzer:
         """
         Main decision function — called by Supervisor each turn after fan-in.
 
-        Both conditions must be true for an adjustment:
-          Increase: trend == "improving" AND avg_ema >= INCREASE_THRESHOLD
-          Decrease: trend == "declining" AND avg_ema < DECREASE_THRESHOLD
+        Increase conditions (either is sufficient):
+          1. trend == "improving" AND avg_ema >= INCREASE_THRESHOLD (7.5)
+          2. trend == "stable"    AND avg_ema >= HIGH_STABLE_THRESHOLD (8.0)
+             Rationale: a candidate already at 8.0+ EMA cannot produce an
+             "improving" trend (EMA ceiling effect) but still deserves harder
+             questions.
+        Decrease condition:
+          trend == "declining" AND avg_ema < DECREASE_THRESHOLD (5.0)
 
-        Why both conditions?
-          - High EMA but declining → candidate was strong, now fading.
-            Don't increase difficulty on a declining candidate.
-          - Low EMA but improving → candidate is recovering.
-            Don't decrease further — let them climb.
+        Why require both trend + level for decrease?
+          - Low EMA but improving → candidate is recovering, don't push down further.
 
         All possible return values:
           (False, "insufficient_data")  → fewer than 4 scores
-          (True,  "increase")           → improving + avg_ema >= 7.5
+          (True,  "increase")           → improving+high OR stable+excellent
           (True,  "decrease")           → declining + avg_ema < 5.0
           (False, "stable")             → all other cases
 
@@ -138,9 +141,13 @@ class TrendAnalyzer:
 
         if trend == "improving" and avg_ema >= self.INCREASE_THRESHOLD:
             return True, "increase"
+        # Candidate is consistently excellent but can't show an "improving" trend
+        # because EMA is already near the ceiling — still warrant harder questions.
+        if trend == "stable" and avg_ema >= self.HIGH_STABLE_THRESHOLD:
+            return True, "increase"
         if trend == "declining" and avg_ema < self.DECREASE_THRESHOLD:
             return True, "decrease"
-        
+
         return False, "stable"
     
     def get_current_ema(self, trajectory: list[float]) -> float:

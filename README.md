@@ -37,7 +37,10 @@ The AI Interview System conducts adaptive technical interviews across AI/ML topi
 
 - Strict state ownership with explicit LangGraph reducers — no race conditions during parallel agent execution
 - Corrective RAG (CRAG) pipeline for intelligent question retrieval with hybrid grading and query refinement
-- EMA-smoothed difficulty adaptation that responds to real performance trends, not noisy per-turn scores
+- EMA-smoothed difficulty adaptation(α=0.3) — smooths noisy per-turn scores 
+  before adjusting difficulty. Two increase paths: (1) improving trend + avg ≥ 7.5, 
+  (2) stable trend + avg ≥ 8.0 — handles candidates who have mastered a level but 
+  have no headroom left to show an upward trend
 - Validation gates + circuit breakers on every agent — LLM non-compliance caught and handled by the system, not by hope
 - TOCTOU-safe atomic cache operations with per-session lock isolation
 - Async LangGraph checkpointing for crash-safe session persistence
@@ -48,7 +51,6 @@ The AI Interview System conducts adaptive technical interviews across AI/ML topi
 ---
 
 ## System Architecture
-
 
 
 ### Overview
@@ -114,9 +116,8 @@ Owns all question decisions and topic tracking.
 - **Three modes** — RETRIEVE (cache + CRAG), FOLLOW_UP (gaps), CLARIFY (misconceptions)
 - **Mode priority** — clarify fires before follow-up; misconceptions must be corrected before probing gaps
 - **Off-topic re-engagement** — rephrases original question instead of abandoning topic; `topics_covered: []` keeps topic on uncovered list
-- **ReAct selection** (7B) — structured output selection from CRAG-graded candidates
-- **Atomic `select_and_mark()`** — eliminates TOCTOU race between question selection and marking used
-- **Dynamic rubric generation** — generates `target_concepts` alongside follow-up/clarify questions for drift detection
+- **Four-tier fallback chain** — cache hit → CRAG retrieval → cache escape hatch (other plan topics) → LLM-generated question (fast_llm, context-aware with last 5 asked questions) → hardcoded last resort. Ensures real questions always served even when a topic is exhausted
+- **Smarter topic cycling** — when all plan topics covered, picks least-served topic with reverse-order tie-break. Prevents always cycling back to `topic_sequence[0]` when it's exhausted
 
 ### Conversation Manager
 Prevents unbounded context growth.
@@ -501,7 +502,6 @@ Fetch available interview topics.
 | Streamlit SSE limitation | True token-by-token streaming requires React frontend — Streamlit rerenders on state change |
 | `estimated_time_minutes` defaults to 5.0 | Time-aware filtering inactive until `scripts/add_time_metadata.py` is run |
 | Shared follow-up/clarify ceiling | `MAX_FOLLOW_UPS=2` is a hard cap across both follow-up and clarify modes. If a follow-up and clarify both occur on the same question, the next clarification hits the ceiling and forces a new question regardless of whether the misconception was resolved. Separate per-mode counters would be more precise |
-| Focus topic enforcement relies on prompt + code guard | Supervisor prompt instructs topic constraint; `create_interview_plan` validates and filters post-parse. Topics with insufficient ChromaDB coverage (< 3 questions) are excluded from the checklist at startup via `get_available_topics()` |
 
 ### Technical Improvements
 

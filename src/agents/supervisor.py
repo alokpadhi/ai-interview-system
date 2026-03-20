@@ -17,6 +17,7 @@ logger = get_logger(__name__)
 DIFFICULTY_ORDER = {"easy": 0, "medium": 1, "hard": 2}
 DIFFICULTY_FROM_ORDER = {0: "easy", 1: "medium", 2: "hard"}
 NEUTRAL_EMA = 5.0
+MAX_QUESTIONS_HARD_CEILING = 15
 
 @dataclass
 class Observation:
@@ -197,6 +198,7 @@ class SupervisorAgent:
                 "difficulty_curve": curve,
                 "time_allocation": plan.time_allocation,
                 "focus_areas": plan.focus_areas,
+                "target_questions": target_questions,
             },
             "original_difficulty": state["difficulty_level"],
             "difficulty_level": difficulty_level,
@@ -241,6 +243,16 @@ class SupervisorAgent:
         should_continue, end_reason = self._decide_continuation(analysis, state)
         new_difficulty, reduced = self._resolve_difficulty(analysis, state)
 
+        logger.info(
+    f"[DEBUG] Q{state['question_count']} | "
+    f"score={new_score} | "
+    f"full_trajectory={full_trajectory} | "
+    f"ema={[round(x,2) for x in new_ema]} | "
+    f"current_ema={round(new_ema[-1],2) if new_ema else 0} | "
+    f"difficulty={state['difficulty_level']} → {new_difficulty} | "
+    f"should_adjust={analysis.should_adjust_difficulty} | "
+    f"direction={analysis.adjustment_direction}"
+)
         logger.info(f"Interview {state['interview_id']} | Q{state['question_count']} | "
                 f"EMA: {new_ema[-1] if new_ema else NEUTRAL_EMA:.2f} | difficulty: {new_difficulty} | "
                 f"continue: {should_continue}")
@@ -300,9 +312,33 @@ class SupervisorAgent:
             avg_ema=obs.current_ema
         )
     
+    # def _decide_continuation(self,
+    #                          analysis: Analysis,
+    #                          state: InterviewState) -> tuple[bool, Optional[str]]:
+    #     # Time is the primary stopping condition.
+    #     if analysis.time_critical:
+    #         return False, "time_up"
+
+    #     # Hard time check: stop if ≤ 2 minutes remain regardless of question count.
+    #     if analysis.time_pressure and analysis.questions_remaining <= 0:
+    #         return False, "time_up"
+
+    #     target = len(state["interview_plan"]["topic_sequence"])
+
+    #     # Soft question limit: only stop if time is also running low (< 5 min).
+    #     # If time is available, keep going — the plan is a guide, not a hard cap.
+    #     if state["question_count"] + 1 >= target and analysis.time_pressure:
+    #         return False, "completed"
+
+    #     # Hard ceiling: prevent runaway sessions (2× the planned question count).
+    #     if state["question_count"] + 1 >= target * 2:
+    #         return False, "completed"
+
+    #     return True, None
+
     def _decide_continuation(self,
-                             analysis: Analysis,
-                             state: InterviewState) -> tuple[bool, Optional[str]]:
+                         analysis: Analysis,
+                         state: InterviewState) -> tuple[bool, Optional[str]]:
         # Time is the primary stopping condition.
         if analysis.time_critical:
             return False, "time_up"
@@ -311,15 +347,22 @@ class SupervisorAgent:
         if analysis.time_pressure and analysis.questions_remaining <= 0:
             return False, "time_up"
 
-        target = len(state["interview_plan"]["topic_sequence"])
+        # Use target_questions from plan — not topic count.
+        # len(topic_sequence) = number of topics, not number of questions.
+        # target_questions = _calculate_target_questions(time_budget) — the actual intent.
+        plan = state.get("interview_plan", {})
+        target = plan.get(
+            "target_questions",
+            len(plan.get("topic_sequence", [MAX_QUESTIONS_HARD_CEILING]))
+        )
 
         # Soft question limit: only stop if time is also running low (< 5 min).
         # If time is available, keep going — the plan is a guide, not a hard cap.
         if state["question_count"] + 1 >= target and analysis.time_pressure:
             return False, "completed"
 
-        # Hard ceiling: prevent runaway sessions (2× the planned question count).
-        if state["question_count"] + 1 >= target * 2:
+        # Hard ceiling: prevent runaway sessions regardless of plan.
+        if state["question_count"] + 1 >= MAX_QUESTIONS_HARD_CEILING:
             return False, "completed"
 
         return True, None

@@ -1,8 +1,10 @@
 from datetime import datetime
+import logging
 
 from src.api.models import FinalReport
 from src.graph.state import InterviewState
 
+logger = logging.getLogger(__name__)
 
 def generate_final_report(state: InterviewState) -> FinalReport:
     all_evaluations = state.get("all_evaluations", [])
@@ -41,6 +43,12 @@ def generate_final_report(state: InterviewState) -> FinalReport:
     
     elapsed = (datetime.now() - state["interview_start_time"]).total_seconds() / 60
     
+    logger.info(f"all_evaluations count: {len(all_evaluations)}")
+    logger.info(f"difficulty_history: {difficulties}")
+    logger.info(f"scores: {[e['overall_score'] for e in all_evaluations]}")
+    logger.info(f"real_evals count: {len(real_evals)}")
+    logger.info(f"weighted_sum: {weighted_sum}, max_possible: {max_possible}")
+    logger.info(f"raw_avg: {raw_avg}, adjusted: {adjusted}")
     return FinalReport(
         overall_score=round(raw_avg, 1),
         adjusted_score=round(adjusted, 1),

@@ -65,6 +65,22 @@ CLARIFICATION_PROMPT = ChatPromptTemplate.from_messages([
      "Detected Misconception: {misconception}")
 ])
 
+FALLBACK_QUESTION_PROMPT = ChatPromptTemplate.from_messages([
+    ("system",
+     "You are a technical interviewer. The question bank is exhausted for the "
+     "planned topics, so you must generate a fresh interview question on the spot.\n\n"
+     "Rules:\n"
+     "- Ask exactly ONE clear, self-contained question.\n"
+     "- Match the difficulty level specified.\n"
+     "- The question must be directly relevant to one of the provided topics.\n"
+     "- Do NOT repeat a question that was already asked (see asked_questions).\n"
+     "- Return ONLY the question text — no preamble, no numbering."),
+    ("human",
+     "Topics: {topics}\n"
+     "Difficulty: {difficulty}\n"
+     "Already asked: {asked_questions}")
+])
+
 RE_ENGAGE_PROMPT = ChatPromptTemplate.from_messages([
     ("system",
      "You are an experienced technical interviewer.\n\n"
@@ -129,6 +145,11 @@ def _build_reengage_chain(llm):
     reengage_chain = RE_ENGAGE_PROMPT | llm | parser
     return reengage_chain.with_retry(stop_after_attempt=2, wait_exponential_jitter=True)
 
+def _build_fallback_question_chain(llm):
+    parser = StrOutputParser()
+    chain = FALLBACK_QUESTION_PROMPT | llm | parser
+    return chain.with_retry(stop_after_attempt=2, wait_exponential_jitter=True)
+
 def _build_selection_chain(llm):
     chain = REACT_SELECTION_PROMPT | llm.with_structured_output(QuestionSelection)
     return chain.with_retry(stop_after_attempt=2, wait_exponential_jitter=True)
@@ -160,6 +181,7 @@ class QuestionSelectorAgent:
         self.clarify_chain = _build_clarify_chain(complex_llm)
         self.reengage_chain = _build_reengage_chain(complex_llm)
         self.react_select_chain = _build_selection_chain(fast_llm)
+        self.fallback_question_chain = _build_fallback_question_chain(fast_llm)
         self.validation_gates = ValidationGateRegistry().get("question_selector")
         self.circuit_breaker = circuit_breaker
 
@@ -316,7 +338,24 @@ class QuestionSelectorAgent:
             if selected is None and crag_result.candidates:
                 selected = crag_result.candidates[0].to_question_dict()
             elif selected is None:
-                selected = self._get_fallback_question()
+                # Primary topic exhausted — try other plan topics from cache
+                # before serving the generic fallback question.
+                plan = state.get("interview_plan", {})
+                for alt_topic in plan.get("topic_sequence", []):
+                    if alt_topic == topic:
+                        continue
+                    alt = await self.cache_store.select_and_mark(
+                        session_id=session_id,
+                        topic=alt_topic,
+                        difficulty=difficulty,
+                        selector_fn=_select_fn,
+                    )
+                    if alt is not None:
+                        selected = alt
+                        topic = alt_topic
+                        break
+                if selected is None:
+                    selected = await self._get_fallback_question(state, config)
 
         selected["question_type"] = "retrieved"
         selected["topic"] = topic
@@ -329,7 +368,7 @@ class QuestionSelectorAgent:
             config: RunnableConfig
     ) -> dict:
         if not candidates:
-            return self._get_fallback_question()
+            return await self._get_fallback_question(state, config)
         
         if len(candidates) == 1:
             return candidates[0]
@@ -354,20 +393,29 @@ class QuestionSelectorAgent:
         topic_sequence = plan.get("topic_sequence", [])
         topics_covered = state.get("topics_covered", [])
 
-        # remaining = [t for t in topic_sequence if t not in topics_covered]
-
         uncovered = [t for t in topic_sequence if t not in topics_covered]
-        remaining = uncovered if uncovered else topic_sequence
 
-        if not remaining:
-            return self._select_weakest_topic(state)
-        
+        if not uncovered:
+            if not topic_sequence:
+                return self._select_weakest_topic(state)
+            # All topics covered at least once — pick the least-served topic to
+            # avoid hammering exhausted topics. Reverse-order tie-break so we
+            # don't always fall back to topic_sequence[0].
+            counts = {t: 0 for t in topic_sequence}
+            for t in topics_covered:
+                if t in counts:
+                    counts[t] += 1
+            min_count = min(counts.values())
+            # reversed() so ties prefer later topics in the sequence
+            candidates = [t for t in reversed(topic_sequence) if counts[t] == min_count]
+            return candidates[0]
+
         if state.get("difficulty_reduced_due_to_performance"):
-            fundamentals = [t for t in remaining if t in self.FUNDAMENTAL_TOPICS]
-            others = [t for t in remaining if t not in self.FUNDAMENTAL_TOPICS]
-            remaining = fundamentals + others if fundamentals else remaining
+            fundamentals = [t for t in uncovered if t in self.FUNDAMENTAL_TOPICS]
+            others = [t for t in uncovered if t not in self.FUNDAMENTAL_TOPICS]
+            uncovered = fundamentals + others if fundamentals else uncovered
 
-        return remaining[0]
+        return uncovered[0]
     
     def _select_weakest_topic(self, state: InterviewState) -> str:
         """
@@ -495,14 +543,45 @@ class QuestionSelectorAgent:
             if ev.get("question_id")
         ]
     
-    def _get_fallback_question(self) -> dict:
-        fallback_id = str(uuid.uuid4())
-        return {
-            "id": "fallback_" + fallback_id,
-            "text": "Can you explain the bias-variance tradeoff?",
-            "question_type": "retrieved",
-            "topic": "machine_learning_fundamentals",
-            "difficulty": "medium",
-            "estimated_time_minutes": 4,
-            "target_concepts": ["bias", "variance", "tradeoff"]
-        }
+    async def _get_fallback_question(
+            self,
+            state: InterviewState,
+            config: RunnableConfig
+    ) -> dict:
+        """Generate a fresh question via LLM when the question bank is exhausted.
+        Falls back to a hardcoded question if the LLM call fails."""
+        plan = state.get("interview_plan", {})
+        topics = plan.get("topic_sequence", ["machine_learning_fundamentals"])
+        difficulty = state.get("difficulty_level", "medium")
+        asked = [
+            ev.get("question_text", "")
+            for ev in state.get("all_evaluations", [])
+            if ev.get("question_text")
+        ]
+        try:
+            text = await self.fallback_question_chain.ainvoke({
+                "topics": ", ".join(topics),
+                "difficulty": difficulty,
+                "asked_questions": asked[-5:] if asked else "none",
+            }, config=config)
+            topic = topics[0]
+            return {
+                "id": "fallback_" + str(uuid.uuid4()),
+                "text": text.strip(),
+                "question_type": "generated",
+                "topic": topic,
+                "difficulty": difficulty,
+                "estimated_time_minutes": 4,
+                "target_concepts": [],
+            }
+        except Exception as e:
+            logger.warning("Fallback question generation failed: %s — using hardcoded", e)
+            return {
+                "id": "fallback_" + str(uuid.uuid4()),
+                "text": "Can you explain the bias-variance tradeoff?",
+                "question_type": "generated",
+                "topic": "machine_learning_fundamentals",
+                "difficulty": "medium",
+                "estimated_time_minutes": 4,
+                "target_concepts": ["bias", "variance", "tradeoff"],
+            }

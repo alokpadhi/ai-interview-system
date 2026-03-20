@@ -103,6 +103,7 @@ class EvaluatorValidationGate:
             self._scores_consistent(output),
             self._required_fields_present(output),
             self._key_point_coverage_alignment(output, rubric_key_points),
+            self._overall_aligns_with_subscores(output),
         ]
 
         failed = [c for c in checks if not c.passed]
@@ -213,6 +214,32 @@ class EvaluatorValidationGate:
                         f"(scores: {[round(s, 1) for s in scores]})"
                     )
                 )
+        return Check(passed=True)
+
+    def _overall_aligns_with_subscores(self, output: dict) -> "Check":
+        """
+        overall_score should be within 2.0 points of sub-score average.
+        Catches cases where LLM assigns mismatched overall vs sub-scores.
+        """
+        sub_fields = ["technical_accuracy", "completeness", "depth", "clarity"]
+        scores = []
+        for f in sub_fields:
+            val = output.get(f)
+            score = val.get("score") if isinstance(val, dict) else val
+            if score is not None:
+                scores.append(float(score))
+        
+        if not scores:
+            return Check(passed=True)  # can't validate without sub-scores
+        
+        avg = sum(scores) / len(scores)
+        overall = float(output.get("overall_score", 5.0))
+        
+        if abs(overall - avg) > 2.0:
+            return Check(
+                passed=False,
+                message=f"overall_score {overall} misaligned with sub-score avg {avg:.1f}"
+            )
         return Check(passed=True)
     
     def _required_fields_present(self, output: dict) -> Check:
