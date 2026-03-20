@@ -54,10 +54,12 @@ The AI Interview System conducts adaptive technical interviews across AI/ML topi
 
 
 ### Overview
-![Architecture Overview Diagram](https://github.com/alokpadhi/ai-interview-system/blob/main/assets/overview.png)
+![Architecture Overview](https://github.com/alokpadhi/ai-interview-system/blob/main/assets/overview.png)
 
 ### Detailed Architecture
-![Detailed Architecture Diagram](https://github.com/alokpadhi/ai-interview-system/blob/main/assets/detailed_architecture.png)
+![Architecture Diagram](https://github.com/alokpadhi/ai-interview-system/blob/main/assets/multi_agent_architecture.md)
+
+[Detailed Version](https://github.com/alokpadhi/ai-interview-system/blob/main/assets/multi_agent_architecture.md)
 
 ### Dual-Model Strategy
 
