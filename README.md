@@ -56,7 +56,7 @@ The AI Interview System conducts adaptive technical interviews across AI/ML topi
 ### Overview
 ![Architecture Overview](https://github.com/alokpadhi/ai-interview-system/blob/main/assets/overview.png)
 
-### Detailed Architecture
+### Architecture
 ```mermaid
 flowchart TD
     %% ─────────────────────────────────────────────
