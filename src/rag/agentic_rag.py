@@ -378,12 +378,12 @@ class AgenticRAGService:
             
         # 4. Fallback
         logger.warning(
-            "All retrieval paths exhausted — serving fallback | "
+            "All retrieval paths exhausted — signalling fallback | "
             "topic=%s difficulty=%s",
             topic, difficulty,
         )
         return RAGResult(
-            candidates=FALLBACK_QUESTIONS,
+            candidates=[],
             grade=RelevanceGrade.LOW,
             is_fallback=True,
             latency_ms=(time.time() - start) * 1000,

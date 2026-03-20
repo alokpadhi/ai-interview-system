@@ -49,6 +49,14 @@ def generate_final_report(state: InterviewState) -> FinalReport:
     logger.info(f"real_evals count: {len(real_evals)}")
     logger.info(f"weighted_sum: {weighted_sum}, max_possible: {max_possible}")
     logger.info(f"raw_avg: {raw_avg}, adjusted: {adjusted}")
+    # Bucket thresholds (all three buckets are now surfaced in the report):
+    #   strengths          >= 7.0  — solid understanding
+    #   needs_practice     6.0–6.9 — close; was silently dropped before
+    #   areas_for_improvement < 6.0 — genuine gaps
+    strengths             = [t for t, s in topic_avgs.items() if s >= 7.0]
+    needs_practice        = [t for t, s in topic_avgs.items() if 6.0 <= s < 7.0]
+    areas_for_improvement = [t for t, s in topic_avgs.items() if s < 6.0]
+
     return FinalReport(
         overall_score=round(raw_avg, 1),
         adjusted_score=round(adjusted, 1),
@@ -56,8 +64,9 @@ def generate_final_report(state: InterviewState) -> FinalReport:
         time_taken_minutes=round(elapsed, 1),
         difficulty_progression=difficulties,
         topic_scores={t: round(s, 1) for t, s in topic_avgs.items()},
-        strengths=[t for t, s in topic_avgs.items() if s >= 7.0],
-        areas_for_improvement=[t for t, s in topic_avgs.items() if s < 6.0],
+        strengths=strengths,
+        needs_practice=needs_practice,
+        areas_for_improvement=areas_for_improvement,
         performance_notes=notes,
         fallback_count=fallback_count,
         detailed_evaluations=all_evaluations

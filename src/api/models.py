@@ -35,6 +35,7 @@ class SubmitResponse(BaseModel):
     next_question: QuestionInfo | None = None
     progress: ProgressInfo
     continue_interview: bool
+    test_results: dict | None = None
 
 class FinalReport(BaseModel):
     overall_score: float
@@ -44,7 +45,8 @@ class FinalReport(BaseModel):
     difficulty_progression: list[str]
     topic_scores: dict[str, float]
     strengths: list[str]
-    areas_for_improvement: list[str]
+    needs_practice: list[str]          # scored 6.0–6.9 — close but not there yet
+    areas_for_improvement: list[str]   # scored < 6.0
     performance_notes: list[str]
     fallback_count: int
     detailed_evaluations: list[dict]

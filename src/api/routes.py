@@ -118,6 +118,7 @@ async def submit_response(request: SubmitRequest,
     elapsed = (datetime.now() - result["interview_start_time"]).total_seconds() / 60
     remaining = result["time_budget_minutes"] - elapsed
 
+    current_eval = result.get("current_evaluation") or {}
     return SubmitResponse(
         feedback=result["current_feedback"],
         next_question=QuestionInfo(
@@ -130,7 +131,8 @@ async def submit_response(request: SubmitRequest,
             time_elapsed_minutes=round(elapsed, 1),
             time_remaining_minutes=round(max(0, remaining), 2)
         ),
-        continue_interview=result["should_continue"]
+        continue_interview=result["should_continue"],
+        test_results=current_eval.get("test_results"),
     )
 
 @router.post("/api/v1/interview/submit_response/stream")
@@ -189,6 +191,7 @@ async def submit_response_stream(request: SubmitRequest,
                     elapsed = (datetime.now() - full_result["interview_start_time"]).total_seconds() / 60
                     remaining = full_result["time_budget_minutes"] - elapsed
 
+                    current_eval = full_result.get("current_evaluation") or {}
                     response = json.dumps(
                         {
                             'type': 'turn_complete',
@@ -203,7 +206,8 @@ async def submit_response_stream(request: SubmitRequest,
                                 questions_completed=full_result["question_count"],
                                 time_elapsed_minutes=round(elapsed, 1),
                                 time_remaining_minutes=round(max(0, remaining), 2)),
-                                continue_interview=full_result["should_continue"]
+                                continue_interview=full_result["should_continue"],
+                                test_results=current_eval.get("test_results"),
                                             ).model_dump()
                         }
                     )

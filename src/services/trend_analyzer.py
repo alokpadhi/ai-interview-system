@@ -21,7 +21,7 @@ class TrendAnalyzer:
     EMA smoothed trend detection to preventy difficulty oscillation.
 
     Thresholds (both conditions required for adjustment):
-     - Increase: avg_ema >=7.5 AND trend=="improving"
+     - Increase: (trend=="improving" AND avg_ema>=7.5) OR (trend in ("stable","improving") AND avg_ema>=8.0)
      - Decrease: avg_ema < 5.0 AND trend == "declining"
 
     Minimum 4 scores before any adjustment - insufficient data -> "stable".
@@ -109,10 +109,11 @@ class TrendAnalyzer:
 
         Increase conditions (either is sufficient):
           1. trend == "improving" AND avg_ema >= INCREASE_THRESHOLD (7.5)
-          2. trend == "stable"    AND avg_ema >= HIGH_STABLE_THRESHOLD (8.0)
-             Rationale: a candidate already at 8.0+ EMA cannot produce an
-             "improving" trend (EMA ceiling effect) but still deserves harder
-             questions.
+          2. trend in ("stable","improving") AND avg_ema >= HIGH_STABLE_THRESHOLD (8.0)
+             Rationale: a candidate already at 8.0+ EMA cannot produce a large
+             "improving" delta (EMA ceiling effect) but still deserves harder
+             questions. "stable" covers steady excellence; "improving" covers
+             a mildly declining high scorer who is still above the threshold.
         Decrease condition:
           trend == "declining" AND avg_ema < DECREASE_THRESHOLD (5.0)
 
@@ -143,9 +144,14 @@ class TrendAnalyzer:
             return True, "increase"
         # Candidate is consistently excellent but can't show an "improving" trend
         # because EMA is already near the ceiling — still warrant harder questions.
-        if trend == "stable" and avg_ema >= self.HIGH_STABLE_THRESHOLD:
+        if trend in ("stable", "improving") and avg_ema >= self.HIGH_STABLE_THRESHOLD:
             return True, "increase"
-        if trend == "declining" and avg_ema < self.DECREASE_THRESHOLD:
+        # Use the average of the last 2 EMA values for decrease — more recent-weighted
+        # than the full 4-point avg, but not a single data point. This requires
+        # sustained recent poor performance (not just one bad question) while
+        # still reacting faster than avg_ema when scores are genuinely in free fall.
+        recent_2_avg = sum(recent_ema[-2:]) / len(recent_ema[-2:])
+        if trend == "declining" and recent_2_avg < self.DECREASE_THRESHOLD:
             return True, "decrease"
 
         return False, "stable"

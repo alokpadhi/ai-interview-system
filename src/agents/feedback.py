@@ -19,13 +19,15 @@ class FeedbackComponents(BaseModel):
     Not an interagent contract.
     """
     strength_acknowledgment: str = Field(
-        description="One sentence explaining what they did well. Empty when score < 5"
+        description="1-2 sentences (minimum 20 words) explaining what they did well, "
+                    "with specific detail from their response. Empty string only when score < 5."
     )
     gap_hint: str = Field(
-        description="Implicit hints about gaps without stating 'you missed X'"
+        description="2-3 sentences (minimum 20 words) of implicit directional hints about "
+                    "conceptual gaps, without stating 'you missed X'. Never fewer than 20 words."
     )
     transition_phrase: str = Field(
-        description="Natural transition; e.g building on that or can be empty"
+        description="Natural transition phrase; e.g 'Building on that...' or can be empty"
     )
 
 OFF_TOPIC_FEEDBACK_PROMPT = ChatPromptTemplate.from_messages([
@@ -63,8 +65,7 @@ class FeedbackComposer:
         "high": [
             "{strength}",
             "{strength} {transition}",
-            "{transition}",                    # Skip strength sometimes
-            "{strength}",                      # Added: avoids 2-template repetition
+            "{strength}",
         ],
         "medium": [
             "{strength} {gap_hint}",
@@ -141,7 +142,18 @@ class FeedbackComposer:
             gap_hint=components.gap_hint,
             transition=transition
         )
-        return " ".join(result.split()), structure
+        result_text = " ".join(result.split())
+
+        # Guard: if composed text is too short, use only gap_hint.
+        # Never combine strength + gap_hint together — doing so reveals both what was
+        # correct and what was missed, which together expose the answer structure.
+        if len(result_text.split()) < 15:
+            gap = components.gap_hint.strip()
+            if len(gap.split()) >= 15:
+                result_text = gap
+                structure = "fallback_gap"
+
+        return result_text, structure
     
 FEEDBACK_PROMPT = ChatPromptTemplate.from_messages([
     ("system",

@@ -1,0 +1,550 @@
+/* ═══════════════════════════════════════════════════════════════
+   AI Interview System — Global Styles
+   Target: Streamlit 1.30+  |  Dark theme (Catppuccin-inspired)
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── Google Fonts ──────────────────────────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+
+/* ── Base typography ───────────────────────────────────────────── */
+html, body, [class*="st-"] {
+    font-family: 'Inter', sans-serif !important;
+}
+
+
+/* ── Hide Streamlit chrome ─────────────────────────────────────── */
+div[data-testid="stToolbar"]        { visibility: hidden; height: 0; position: fixed; }
+div[data-testid="stDecoration"]     { visibility: hidden; height: 0; position: fixed; }
+div[data-testid="stStatusWidget"]   { visibility: hidden; height: 0; position: fixed; }
+#MainMenu                           { visibility: hidden; height: 0; }
+header                              { visibility: hidden; height: 0; }
+footer                              { visibility: hidden; }
+
+/* Reduce default top padding that header removal leaves behind */
+.block-container {
+    padding-top: 2rem !important;
+    padding-bottom: 2rem !important;
+    max-width: 860px !important;
+}
+
+
+/* ── Dark scrollbar ────────────────────────────────────────────── */
+::-webkit-scrollbar              { width: 6px; height: 6px; }
+::-webkit-scrollbar-track        { background: #1e1e2e; }
+::-webkit-scrollbar-thumb        { background: #45475a; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover  { background: #7c6af7; }
+
+
+/* ══════════════════════════════════════════════════════════════════
+   BUTTONS
+   Selector note: data-testid="stBaseButton-{kind}" is stable in
+   Streamlit 1.36+. The legacy .stButton > button fallback is kept
+   for robustness.
+   ══════════════════════════════════════════════════════════════════ */
+
+/* Primary */
+[data-testid="stBaseButton-primary"],
+.stButton > button[kind="primary"] {
+    background: linear-gradient(135deg, #7c6af7 0%, #6454d6 100%);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-family: 'Inter', sans-serif;
+    font-weight: 600;
+    font-size: 0.92rem;
+    letter-spacing: 0.01em;
+    padding: 0.55rem 1.2rem;
+    transition: opacity 0.18s ease, transform 0.12s ease, box-shadow 0.18s ease;
+    box-shadow: 0 2px 12px rgba(124, 106, 247, 0.3);
+}
+[data-testid="stBaseButton-primary"]:hover,
+.stButton > button[kind="primary"]:hover {
+    opacity: 0.88;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 20px rgba(124, 106, 247, 0.45);
+}
+[data-testid="stBaseButton-primary"]:active,
+.stButton > button[kind="primary"]:active {
+    transform: translateY(0);
+    opacity: 1;
+}
+
+/* Secondary */
+[data-testid="stBaseButton-secondary"],
+.stButton > button[kind="secondary"] {
+    background: #1e1e2e;
+    color: #cdd6f4;
+    border: 1px solid #45475a;
+    border-radius: 8px;
+    font-family: 'Inter', sans-serif;
+    font-weight: 500;
+    font-size: 0.92rem;
+    padding: 0.55rem 1.2rem;
+    transition: border-color 0.18s ease, color 0.18s ease, background 0.18s ease;
+}
+[data-testid="stBaseButton-secondary"]:hover,
+.stButton > button[kind="secondary"]:hover {
+    border-color: #7c6af7;
+    color: #cba6f7;
+    background: #252536;
+}
+
+
+/* ══════════════════════════════════════════════════════════════════
+   METRICS
+   ══════════════════════════════════════════════════════════════════ */
+[data-testid="stMetric"] {
+    background: #1e1e2e;
+    border: 1px solid #313244;
+    border-radius: 10px;
+    padding: 1rem 1.2rem;
+    transition: border-color 0.18s ease;
+}
+[data-testid="stMetric"]:hover {
+    border-color: #45475a;
+}
+[data-testid="stMetricLabel"] > div {
+    color: #a6adc8;
+    font-size: 0.82rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+[data-testid="stMetricValue"] > div {
+    color: #cba6f7;
+    font-size: 1.8rem;
+    font-weight: 700;
+}
+[data-testid="stMetricDelta"] > div {
+    font-size: 0.82rem;
+}
+
+
+/* ══════════════════════════════════════════════════════════════════
+   PROGRESS BAR
+   Fill color is driven by primaryColor in config.toml.
+   These rules style the track and round the corners.
+   ══════════════════════════════════════════════════════════════════ */
+.stProgress > div > div > div {
+    background: #313244;
+    border-radius: 999px;
+    height: 6px !important;
+}
+.stProgress > div > div > div > div {
+    border-radius: 999px;
+    /* gradient fallback — only applies if primaryColor CSS var not honoured */
+    background: linear-gradient(90deg, #7c6af7, #b4a0ff);
+}
+
+
+/* ══════════════════════════════════════════════════════════════════
+   TEXT AREA
+   aria-label selectors are used here only for the code editor
+   (Your Code) since that textarea needs monospace styling.
+   General textareas are targeted via data-testid.
+   ══════════════════════════════════════════════════════════════════ */
+[data-testid="stTextArea"] textarea {
+    background: #1e1e2e !important;
+    color: #cdd6f4 !important;
+    border: 1px solid #313244 !important;
+    border-radius: 8px !important;
+    font-family: 'Inter', sans-serif !important;
+    font-size: 0.95rem !important;
+    line-height: 1.6 !important;
+    caret-color: #cba6f7;
+    transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+[data-testid="stTextArea"] textarea:focus {
+    border-color: #7c6af7 !important;
+    box-shadow: 0 0 0 2px rgba(124, 106, 247, 0.18) !important;
+    outline: none !important;
+}
+
+/* Code editor textarea — monospace override */
+textarea[aria-label="Your Code"] {
+    font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace !important;
+    font-size: 0.87rem !important;
+    line-height: 1.65 !important;
+    background: #181825 !important;
+    color: #cdd6f4 !important;
+    border: 1px solid #313244 !important;
+    border-top: none !important;
+    border-radius: 0 0 8px 8px !important;
+    padding: 12px 16px !important;
+    caret-color: #cba6f7 !important;
+}
+textarea[aria-label="Your Code"]:focus {
+    border-color: #7c6af7 !important;
+    box-shadow: 0 0 0 2px rgba(124, 106, 247, 0.15) !important;
+    outline: none !important;
+}
+
+
+/* ══════════════════════════════════════════════════════════════════
+   SELECTBOX  +  MULTISELECT
+   Outer shell: data-testid.  Dropdown and chips: data-baseweb
+   (BaseWeb is Streamlit's underlying UI lib — stable selectors).
+   ══════════════════════════════════════════════════════════════════ */
+
+/* Selectbox trigger */
+[data-testid="stSelectbox"] > div > div {
+    background: #1e1e2e !important;
+    border: 1px solid #313244 !important;
+    border-radius: 8px !important;
+    transition: border-color 0.18s ease;
+}
+[data-testid="stSelectbox"] > div > div:focus-within {
+    border-color: #7c6af7 !important;
+    box-shadow: 0 0 0 2px rgba(124, 106, 247, 0.18) !important;
+}
+
+/* Dropdown list */
+[data-baseweb="popover"] { z-index: 9999; }
+[data-baseweb="menu"]    {
+    background: #181825 !important;
+    border: 1px solid #313244 !important;
+    border-radius: 8px !important;
+    padding: 4px !important;
+}
+[data-baseweb="menu"] li {
+    border-radius: 6px !important;
+    color: #cdd6f4 !important;
+    font-size: 0.9rem;
+}
+[data-baseweb="menu"] li:hover,
+[data-baseweb="menu"] li[aria-selected="true"] {
+    background: #313244 !important;
+    color: #cba6f7 !important;
+}
+
+/* Multiselect trigger */
+[data-testid="stMultiSelect"] > div > div {
+    background: #1e1e2e !important;
+    border: 1px solid #313244 !important;
+    border-radius: 8px !important;
+    transition: border-color 0.18s ease;
+}
+[data-testid="stMultiSelect"] > div > div:focus-within {
+    border-color: #7c6af7 !important;
+    box-shadow: 0 0 0 2px rgba(124, 106, 247, 0.18) !important;
+}
+
+/* Chips inside multiselect */
+[data-baseweb="tag"] {
+    background: #313244 !important;
+    color: #cba6f7 !important;
+    border-radius: 20px !important;
+    border: 1px solid #45475a !important;
+    font-size: 0.8rem !important;
+    font-weight: 500 !important;
+}
+[data-baseweb="tag"] span { color: #cba6f7 !important; }
+[data-baseweb="tag"] button { color: #a6adc8 !important; }
+[data-baseweb="tag"] button:hover { color: #f38ba8 !important; }
+
+
+/* ══════════════════════════════════════════════════════════════════
+   SLIDER
+   Thumb + fill colour driven by primaryColor in config.toml.
+   Track background styled here.
+   ══════════════════════════════════════════════════════════════════ */
+[data-testid="stSlider"] > div > div > div {
+    background: #313244;
+}
+[data-testid="stSlider"] [role="slider"] {
+    background: #7c6af7 !important;
+    border: 2px solid #b4a0ff !important;
+    box-shadow: 0 0 6px rgba(124, 106, 247, 0.5) !important;
+}
+/* Tick label */
+[data-testid="stSlider"] p {
+    font-size: 0.8rem;
+    color: #a6adc8;
+}
+
+
+/* ══════════════════════════════════════════════════════════════════
+   RADIO
+   ══════════════════════════════════════════════════════════════════ */
+[data-testid="stRadio"] label {
+    color: #cdd6f4;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: color 0.15s ease;
+}
+[data-testid="stRadio"] label:hover { color: #cba6f7; }
+
+/* Selected radio dot — driven by primaryColor; no CSS override needed */
+
+
+/* ══════════════════════════════════════════════════════════════════
+   EXPANDER
+   ══════════════════════════════════════════════════════════════════ */
+[data-testid="stExpander"] {
+    background: #181825 !important;
+    border: 1px solid #313244 !important;
+    border-radius: 10px !important;
+    /* overflow: hidden intentionally removed — it creates a block-formatting context
+       that prevents Streamlit's expander animation from correctly pushing down
+       surrounding elements, causing visual overlap on expand. */
+    overflow: visible;
+    transition: border-color 0.18s ease;
+}
+[data-testid="stExpander"]:hover { border-color: #45475a !important; }
+
+/* Header row */
+[data-testid="stExpander"] details summary {
+    color: #cdd6f4;
+    font-weight: 500;
+    font-size: 0.95rem;
+    padding: 0.75rem 1rem;
+    cursor: pointer;
+    transition: color 0.15s ease;
+    border-radius: 10px;
+}
+[data-testid="stExpander"] details[open] summary {
+    border-radius: 10px 10px 0 0;
+    border-bottom: 1px solid #313244;
+}
+[data-testid="stExpander"] details summary:hover { color: #cba6f7; }
+
+/* Arrow icon */
+[data-testid="stExpander"] details summary svg { stroke: #a6adc8; }
+
+/* Content area — give it room to breathe */
+[data-testid="stExpander"] details > div {
+    padding: 0.5rem 0;
+    overflow: visible;
+}
+
+
+/* ══════════════════════════════════════════════════════════════════
+   DIVIDER
+   ══════════════════════════════════════════════════════════════════ */
+hr { border-color: #313244 !important; margin: 1.2rem 0 !important; }
+
+
+/* ══════════════════════════════════════════════════════════════════
+   CUSTOM COMPONENTS
+   (used in app.py via st.markdown unsafe_allow_html=True)
+   ══════════════════════════════════════════════════════════════════ */
+
+/* ── Hero / setup banner ── */
+.ais-hero {
+    background: linear-gradient(135deg, #1e1e2e 0%, #252540 100%);
+    border: 1px solid #313244;
+    border-radius: 14px;
+    padding: 2.5rem 2rem;
+    margin-bottom: 1.5rem;
+    text-align: center;
+}
+.ais-hero h1 {
+    font-size: 2rem;
+    font-weight: 700;
+    color: #cba6f7;
+    margin: 0 0 0.4rem 0;
+    letter-spacing: -0.02em;
+}
+.ais-hero p {
+    color: #a6adc8;
+    font-size: 1rem;
+    margin: 0;
+}
+
+/* ── Topic badge ── */
+.ais-badge {
+    display: inline-block;
+    background: #313244;
+    color: #cba6f7;
+    border: 1px solid #45475a;
+    padding: 0.2rem 0.75rem;
+    border-radius: 20px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    margin-bottom: 0.8rem;
+}
+
+/* ── Question card ── */
+.ais-question {
+    background: #1e1e2e;
+    border-left: 3px solid #7c6af7;
+    border-radius: 0 10px 10px 0;
+    padding: 1.2rem 1.5rem;
+    margin-bottom: 0.8rem;
+    color: #cdd6f4;
+    font-size: 1.05rem;
+    line-height: 1.7;
+    box-shadow: 0 2px 16px rgba(0,0,0,0.25);
+}
+
+/* ── Feedback card ── */
+.ais-feedback {
+    background: #1a2a1a;
+    border-left: 3px solid #a6e3a1;
+    border-radius: 0 10px 10px 0;
+    padding: 1rem 1.5rem;
+    margin-top: 0.8rem;
+    color: #cdd6f4;
+    font-size: 0.95rem;
+    line-height: 1.65;
+}
+
+/* ── Score card (final report) ── */
+.ais-score-card {
+    background: #1e1e2e;
+    border: 1px solid #313244;
+    border-radius: 12px;
+    padding: 1.4rem 1rem;
+    text-align: center;
+    transition: border-color 0.18s ease, transform 0.18s ease;
+}
+.ais-score-card:hover {
+    border-color: #7c6af7;
+    transform: translateY(-2px);
+}
+.ais-score-number {
+    font-size: 2.4rem;
+    font-weight: 700;
+    line-height: 1;
+    margin-bottom: 0.3rem;
+}
+.ais-score-label {
+    font-size: 0.8rem;
+    color: #a6adc8;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+/* ── Topic progress bar row ── */
+.ais-topic-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.55rem;
+}
+.ais-topic-label {
+    min-width: 160px;
+    font-size: 0.88rem;
+    color: #cdd6f4;
+    font-weight: 500;
+}
+.ais-topic-bar-wrap {
+    flex: 1;
+    background: #313244;
+    border-radius: 999px;
+    height: 6px;
+    overflow: hidden;
+}
+.ais-topic-bar-fill {
+    height: 100%;
+    border-radius: 999px;
+    background: linear-gradient(90deg, #7c6af7, #b4a0ff);
+    transition: width 0.6s ease;
+}
+.ais-topic-score {
+    min-width: 36px;
+    text-align: right;
+    font-size: 0.88rem;
+    font-weight: 600;
+}
+
+/* ── History item (legacy fallback — layout now uses st.container) ── */
+.ais-history-item {
+    background: #181825;
+    border: 1px solid #313244;
+    border-radius: 8px;
+    padding: 1rem 1.1rem;
+    margin-bottom: 0.7rem;
+    font-size: 0.88rem;
+    line-height: 1.55;
+}
+
+/* ── History section (wraps the toggle-revealed items) ── */
+.ais-history-section {
+    margin-top: 0.5rem;
+}
+
+/* ── Question-breakdown toggle buttons (qb_btn_N keys) ──
+   Give them a subdued row-header look so they read as collapsible
+   sections rather than actions.  The [data-testid] selector targets
+   all secondary buttons; the font-weight/text-align distinguish them
+   visually from action buttons without needing a wrapper class.     ── */
+[data-testid="stBaseButton-secondary"] {
+    text-align: left !important;
+    font-size: 0.9rem !important;
+    font-weight: 500 !important;
+    letter-spacing: 0.01em !important;
+    padding: 0.6rem 1rem !important;
+}
+
+/* Small breathing room between the detail container and the next button */
+[data-testid="stVerticalBlock"] > [data-testid="stVerticalBlock"] {
+    margin-bottom: 0.25rem;
+}
+
+/* ── Code editor chrome (macOS dots) ── */
+.ais-code-toolbar {
+    background: #181825;
+    border: 1px solid #313244;
+    border-bottom: none;
+    border-radius: 8px 8px 0 0;
+    padding: 0.55rem 1rem;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.ais-win-dot {
+    width: 11px; height: 11px;
+    border-radius: 50%;
+    display: inline-block;
+    flex-shrink: 0;
+}
+.ais-win-dot-r { background: #f38ba8; }
+.ais-win-dot-y { background: #f9e2af; }
+.ais-win-dot-g { background: #a6e3a1; }
+.ais-code-lang {
+    margin-left: 10px;
+    font-family: monospace;
+    font-size: 0.78rem;
+    color: #cba6f7;
+    letter-spacing: 0.04em;
+}
+
+/* ── Test-results panel ── */
+.ais-test-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    background: #181825;
+    border: 1px solid #313244;
+    border-bottom: none;
+    border-radius: 8px 8px 0 0;
+    padding: 0.6rem 1rem;
+    font-size: 0.82rem;
+    color: #a6adc8;
+}
+.ais-test-badge {
+    border-radius: 12px;
+    padding: 0.15rem 0.65rem;
+    font-size: 0.76rem;
+    font-weight: 600;
+}
+.ais-test-badge-pass { background: #1e3a2e; color: #a6e3a1; border: 1px solid #a6e3a1; }
+.ais-test-badge-fail { background: #3a1e1e; color: #f38ba8; border: 1px solid #f38ba8; }
+.ais-test-row {
+    background: #1e1e2e;
+    border: 1px solid #313244;
+    border-top: none;
+    padding: 0.5rem 1rem;
+    font-family: monospace;
+    font-size: 0.8rem;
+    color: #cdd6f4;
+}
+.ais-test-row:last-child { border-radius: 0 0 8px 8px; }
+.ais-test-row-pass  { border-left: 3px solid #a6e3a1; }
+.ais-test-row-fail  { border-left: 3px solid #f38ba8; }
+.ais-test-row-error { border-left: 3px solid #f9e2af; }

@@ -10,6 +10,7 @@ from src.agents.contracts import EvaluationOutput
 from src.graph.state import InterviewState
 from src.tools.code_validator import code_validator, _contains_code
 from src.tools.rubric_tool import rubric_lookup
+from src.tools.test_runner import run_tests
 from src.services.validation import ValidationGateRegistry, CircuitBreaker
 
 logger = get_logger(__name__)
@@ -420,6 +421,28 @@ class EvaluatorAgent:
 
         rubric_context = await self._build_rubric_context(question)
 
+        # ── Test execution for coding questions ───────────────────────────────
+        # Run BEFORE the LLM call so pass/fail info is visible to the evaluator.
+        test_results: dict | None = None
+        if question.get("topic") == "coding":
+            question_id = question.get("id", "")
+            test_results = await asyncio.to_thread(run_tests, question_id, response)
+            if not test_results["skipped"]:
+                p, t = test_results["passed"], test_results["total"]
+                lines = [f"\nTest Execution: {p}/{t} test case(s) passed."]
+                for r in test_results["results"]:
+                    status = "PASS" if r["passed"] else "FAIL"
+                    if r["error"]:
+                        lines.append(f"  [{status}] Test {r['index']}: {r['error']}")
+                    elif not r["passed"]:
+                        lines.append(
+                            f"  [{status}] Test {r['index']}: "
+                            f"input={r['input']} | expected={r['expected']} | got={r['actual']}"
+                        )
+                    else:
+                        lines.append(f"  [{status}] Test {r['index']}")
+                rubric_context += "\n".join(lines)
+
         raw = await self.eval_chain.ainvoke(
             {
                 "question": question["text"],
@@ -438,6 +461,7 @@ class EvaluatorAgent:
         # topic, question_id injection
         eval_dict["topic"] = question.get("topic", "general")
         eval_dict["question_id"] = question.get("id", "")
+        eval_dict["test_results"] = test_results
 
         # Normalize sub-score spread before validation and reflection.
         # Prevents retries caused by the LLM awarding an outlier score (e.g. high
