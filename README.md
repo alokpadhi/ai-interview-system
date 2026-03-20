@@ -501,6 +501,7 @@ Fetch available interview topics.
 | Streamlit SSE limitation | True token-by-token streaming requires React frontend — Streamlit rerenders on state change |
 | `estimated_time_minutes` defaults to 5.0 | Time-aware filtering inactive until `scripts/add_time_metadata.py` is run |
 | Shared follow-up/clarify ceiling | `MAX_FOLLOW_UPS=2` is a hard cap across both follow-up and clarify modes. If a follow-up and clarify both occur on the same question, the next clarification hits the ceiling and forces a new question regardless of whether the misconception was resolved. Separate per-mode counters would be more precise |
+| Focus topic enforcement relies on prompt + code guard | Supervisor prompt instructs topic constraint; `create_interview_plan` validates and filters post-parse. Topics with insufficient ChromaDB coverage (< 3 questions) are excluded from the checklist at startup via `get_available_topics()` |
 
 ### Technical Improvements
 

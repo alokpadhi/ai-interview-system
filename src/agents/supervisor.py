@@ -63,14 +63,18 @@ INTERVIEW_PLAN_PROMPT = ChatPromptTemplate.from_messages([
      "Return valid JSON with exactly these keys: "
      "topic_sequence, difficulty_curve, time_allocation, focus_areas.\n\n"
      "Rules:\n"
-     "- topic_sequence MUST only contain topics from the available_topics list. "
+     "- If focus_topics is provided and non-empty, topic_sequence MUST only "
+     "contain topics from the focus_topics list. Do NOT expand, interpret, "
+     "substitute, or add related topics. Use the exact topic names as given.\n"
+     "- If focus_topics is empty, select topics freely from available_topics.\n"
+     "- topic_sequence must ONLY contain topics from available_topics. "
      "Do not invent new topic names.\n"
      "- difficulty_curve has ONE entry per topic (not per question). "
      "Values must be exactly one of: \"easy\", \"medium\", \"hard\".\n"
-     "  Example: if topic_sequence is [\"transformers\", \"RAG\"], "
+     "  Example: if topic_sequence is [\"transformers\", \"rag\"], "
      "difficulty_curve must be [\"medium\", \"hard\"]\n"
      "- time_allocation must map each topic name to minutes as a flat dict. "
-     "Example: {{\"transformers\": 8, \"RAG\": 7}}. "
+     "Example: {{\"transformers\": 8, \"rag\": 7}}. "
      "Every topic in topic_sequence must have an entry. "
      "Total must equal time_budget_minutes exactly.\n"
      "- focus_areas is a list of strings describing key concepts to emphasize."),
@@ -81,6 +85,7 @@ INTERVIEW_PLAN_PROMPT = ChatPromptTemplate.from_messages([
      "Target questions: {target_questions}\n"
      "Available topics: {available_topics}")
 ])
+
 def _build_plan_chain(complex_llm):
     return (INTERVIEW_PLAN_PROMPT
             | complex_llm.with_structured_output(PlanOutput)).with_retry(
@@ -115,6 +120,33 @@ class SupervisorAgent:
         self.plan_chain = _build_plan_chain(complex_llm)
         self.available_topics = available_topics
 
+    # async def create_interview_plan(self, 
+    #                           state: InterviewState, 
+    #                           config: RunnableConfig) -> dict:
+    #     """
+    #     Create plan only. First topic retrieval handled by QS.
+    #     Background pre-warming triggered by API layer after graph completes.
+    #     """
+    #     target_questions = self._calculate_target_questions(state["time_budget_minutes"])
+
+    #     plan = await self.plan_chain.ainvoke({
+    #         "difficulty": state["difficulty_level"],
+    #         "focus_topics": state.get("focus_topics", []),
+    #         "time_budget": state["time_budget_minutes"],
+    #         "target_questions": target_questions,
+    #         "available_topics": self.available_topics,
+    #     }, config=config)
+
+    #     difficulty_level = plan.difficulty_curve[0]
+
+    #     return {
+    #         "interview_plan": plan.model_dump(),
+    #         "original_difficulty": state["difficulty_level"],
+    #         "difficulty_level": difficulty_level,
+    #         "difficulty_reduced_due_to_performance": False,
+    #         "stage": "questioning"
+    #     }
+    
     async def create_interview_plan(self, 
                               state: InterviewState, 
                               config: RunnableConfig) -> dict:
@@ -132,16 +164,45 @@ class SupervisorAgent:
             "available_topics": self.available_topics,
         }, config=config)
 
-        difficulty_level = plan.difficulty_curve[0]
+        # enforce focus_topics constraint in code
+        # .with_structured_output() guarantees shape
+        focus_topics = state.get("focus_topics", [])
+        valid_topics = set(focus_topics) if focus_topics else set(self.available_topics)
+
+        filtered_sequence = [
+            t for t in plan.topic_sequence
+            if t in valid_topics
+        ]
+
+        if not filtered_sequence:
+            logger.warning(
+                "topic_sequence empty after focus_topics validation — "
+                "falling back to focus_topics or available_topics[:3]"
+            )
+            filtered_sequence = (
+                focus_topics if focus_topics 
+                else self.available_topics[:3]
+            )
+
+        # sync curve length — LLM may return mismatched lengths after filtering
+        curve = plan.difficulty_curve
+        if len(curve) != len(filtered_sequence):
+            curve = [state["difficulty_level"]] * len(filtered_sequence)
+
+        difficulty_level = curve[0]
 
         return {
-            "interview_plan": plan.model_dump(),
+            "interview_plan": {
+                "topic_sequence": filtered_sequence,
+                "difficulty_curve": curve,
+                "time_allocation": plan.time_allocation,
+                "focus_areas": plan.focus_areas,
+            },
             "original_difficulty": state["difficulty_level"],
             "difficulty_level": difficulty_level,
             "difficulty_reduced_due_to_performance": False,
             "stage": "questioning"
         }
-    
     def _calculate_target_questions(self, time_budget: int) -> int:
         return max(5, min(12, time_budget // 4)) # 30min -> 7-8 questions; 60min -> 12 questions
     
